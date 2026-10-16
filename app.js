@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-var KEY='math-analyze-teacher-v1', BANKKEY='math-analyze-catalog-v1', DBNAME='math-analyze-question-images-v1', ASSET_VERSION='v2-isolated-layout';
+var KEY='math-analyze-teacher-v1', BANKKEY='math-analyze-catalog-v1', DBNAME='math-analyze-question-images-v1', ASSET_VERSION='v3-rasterized-ole';
 var TOPICS=[['R1','根式的表示','2-2'],['R2','根式的乘法','2-2'],['R3','根式的除法','2-2'],['R4','根式的加減','2-2'],['R5','根式的四則運算','2-2'],['P1','畢氏定理','2-3'],['P2','平面上兩點的距離','2-3'],['F1','因式與倍式','3-1'],['F2','利用提公因式法因式分解','3-1'],['F3','利用乘法公式因式分解','3-1'],['X1','二次項係數為1的十字交乘法','3-2'],['X2','二次項係數不為1的十字交乘法','3-2']];
 var state={students:[],papers:[],results:[],overrides:{},packVersion:''}, catalog=null, byId={}, dbPromise=null, imageUrls={}, selectedPaperId='', bankPage=0, currentRecord={wrong:[],blank:[],reasons:{}}, previewToken=0;
 function $(id){return document.getElementById(id);}
@@ -23,8 +23,8 @@ function applyCatalog(data,persist){
 function db(){if(dbPromise)return dbPromise;dbPromise=new Promise(function(resolve,reject){var req=indexedDB.open(DBNAME,1);req.onupgradeneeded=function(){req.result.createObjectStore('cards');};req.onsuccess=function(){resolve(req.result);};req.onerror=function(){reject(req.error);};});return dbPromise;}
 async function blobFor(id){try{var d=await db();return await new Promise(function(resolve,reject){var q=d.transaction('cards','readonly').objectStore('cards').get(id);q.onsuccess=function(){resolve(q.result||null);};q.onerror=function(){reject(q.error);};});}catch(e){return null;}}
 async function cardUrl(id){if(imageUrls[id])return imageUrls[id];var b=await blobFor(id);if(!b)return '';var u=URL.createObjectURL(b);imageUrls[id]=u;return u;}
-function active(q){if(!q)return false;if(state.overrides[q.question_id]===false)return false;if(state.overrides[q.question_id]===true)return true;var s=q.quality_status||'';return s.indexOf('形式初篩通過')===0||s.indexOf('待驗：原圖')===0;}
-function quality(q){if(state.overrides[q.question_id]===false)return 'blocked';if(state.overrides[q.question_id]===true)return 'usable';if(active(q))return 'usable';return (q.quality_status||'').indexOf('停用')>=0?'blocked':'review';}
+function active(q){if(!q||q.render_integrity==='needs_manual_review')return false;if(state.overrides[q.question_id]===false)return false;if(state.overrides[q.question_id]===true)return true;var s=q.quality_status||'';return s.indexOf('形式初篩通過')===0||s.indexOf('待驗：原圖')===0;}
+function quality(q){if(q.render_integrity==='needs_manual_review')return 'blocked';if(state.overrides[q.question_id]===false)return 'blocked';if(state.overrides[q.question_id]===true)return 'usable';if(active(q))return 'usable';return (q.quality_status||'').indexOf('停用')>=0?'blocked':'review';}
 function qname(q){return q.primary_topic||TOPICS.find(function(t){return t[0]===q.primary_topic_code;})?.[1]||'待審';}
 function topicName(code){return (TOPICS.find(function(t){return t[0]===code;})||[])[1]||'未知考點';}
 function optionHtml(values,choice){return values.map(function(a){return '<option value="'+safe(a[0])+'"'+(a[0]===choice?' selected':'')+'>'+safe(a[1])+'</option>';}).join('');}
@@ -124,7 +124,7 @@ function selectQuestions(count,topicCodes,scope,week){
 }
 function weighted(arr,fn){if(!arr.length)return null;var values=arr.map(function(x){return Math.max(.01,fn(x));});var sum=values.reduce(function(a,b){return a+b;},0),pick=Math.random()*sum;for(var i=0;i<arr.length;i++){pick-=values[i];if(pick<=0)return arr[i];}return arr[arr.length-1];}
 function makePaper(){
- if(!catalog||state.packVersion!==ASSET_VERSION)return notify('請先在「設定與備份」匯入新版 v2 的780題完整題圖包。',true);
+ if(!catalog||state.packVersion!==ASSET_VERSION)return notify('請先在「設定與備份」匯入新版 v3 的780題完整題圖包。',true);
  var count=parseInt(val('paperCount'),10),minutes=parseInt(val('paperMinutes'),10),week=parseInt(val('paperWeek'),10),mode=val('paperMode'),student=mode==='individual'?val('paperStudent'):'';
  var topics=Array.from(document.querySelectorAll('#paperTopics input:checked')).map(function(x){return x.value;});
  if(!topics.length)return notify('請至少勾選一個考點。',true);
@@ -141,7 +141,7 @@ function paperList(){
 async function renderPreview(){
  var token=++previewToken,p=paperOf(selectedPaperId);
  $('printPaper').disabled=!p||state.packVersion!==ASSET_VERSION;$('downloadAnswers').disabled=!p;
- if(!p){$('paperPreview').innerHTML=empty('尚未選擇考卷','出卷後會顯示題圖。');$('paperSelectedLabel').textContent='尚未選擇考卷';return;}if(state.packVersion!==ASSET_VERSION){$('paperPreview').innerHTML=empty('請重新匯入 v2 題圖包','舊版 PDF 切圖可能裁掉根式或分數上緣；匯入新版前暫停顯示與列印。');$('paperSelectedLabel').textContent=p.title;return;}
+ if(!p){$('paperPreview').innerHTML=empty('尚未選擇考卷','出卷後會顯示題圖。');$('paperSelectedLabel').textContent='尚未選擇考卷';return;}if(state.packVersion!==ASSET_VERSION){$('paperPreview').innerHTML=empty('請重新匯入 v3 題圖包','舊版 PDF 切圖可能裁掉根式或分數上緣；匯入新版前暫停顯示與列印。');$('paperSelectedLabel').textContent=p.title;return;}
  $('paperSelectedLabel').textContent=p.title+'｜'+p.questionIds.length+'題｜'+p.minutes+'分鐘';
  $('paperPreview').innerHTML='<p class="hint">正在載入來源題圖……</p>';
  var texts=[];
@@ -155,7 +155,7 @@ function csvDownload(name,rows){var csv='\ufeff'+rows.map(function(r){return r.m
 function download(name,mime,content){var url=URL.createObjectURL(new Blob([content],{type:mime})),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},500);}
 function answersCsv(){var p=paperOf(selectedPaperId);if(!p)return;csvDownload('答案_'+p.title+'.csv',[['新題號','題庫編號','考點','標準答案（來源未全面獨立驗算）']].concat(p.questionIds.map(function(id,i){return [i+1,id,qname(byId[id]),byId[id].answer_as_provided];})));}
 async function printCurrent(){
- var p=paperOf(selectedPaperId);if(!p)return;if(state.packVersion!==ASSET_VERSION){notify('舊圖包已停用；請先匯入v2題圖包。',true);return;}
+ var p=paperOf(selectedPaperId);if(!p)return;if(state.packVersion!==ASSET_VERSION){notify('舊圖包已停用；請先匯入v3題圖包。',true);return;}
  var cards=[];for(var i=0;i<p.questionIds.length;i++){var id=p.questionIds[i],u=await cardUrl(id);if(!u){notify('缺少原題圖：'+id+'，請重新匯入題包。',true);return;}cards.push('<div class="print-q"><div class="num">第 '+(i+1)+' 題</div><img src="'+u+'" alt="第'+(i+1)+'題"></div>');}
  $('print-root').innerHTML='<div class="print-hdr"><h2>'+safe(p.title)+'</h2><p>座號：＿＿＿＿　姓名：＿＿＿＿　　測驗時間：'+p.minutes+' 分鐘　　共 '+p.questionIds.length+' 題</p></div>'+cards.join('')+'<div class="answerpage"><h2>教師用答案卷（來源答案，請覆核）</h2><p>'+safe(p.title)+'</p><div class="answergrid">'+p.questionIds.map(function(id,i){return '<div>'+(i+1)+'. '+safe(byId[id].answer_as_provided)+'</div>';}).join('')+'</div></div>';
  var imgs=Array.from($('print-root').querySelectorAll('img'));
@@ -205,7 +205,7 @@ async function importZip(file){
  if(!window.JSZip)throw Error('ZIP 解壓元件載入失敗，請確認網路可連線後重新整理。');
  var progress=$('importProgress');progress.textContent='正在讀取 ZIP……';
  var zip=await window.JSZip.loadAsync(file);var item=zip.file('catalog.json');if(!item)throw Error('缺少 catalog.json，請選擇專用的780題題圖包。');
- var data=JSON.parse(await item.async('string'));if(data.metadata?.asset_version!==ASSET_VERSION)throw Error('此為舊版題圖包，容易截斷根式／分式。請下載並選擇 v2 重新排版原圖包。');if(data.questions.length!==780)throw Error('題庫預期780題，實際'+data.questions.length+'題。');
+ var data=JSON.parse(await item.async('string'));if(data.metadata?.asset_version!==ASSET_VERSION)throw Error('此為舊版題圖包，容易截斷根式／分式。請下載並選擇 v3 MathType 修正版原圖包。');if(data.questions.length!==780)throw Error('題庫預期780題，實際'+data.questions.length+'題。');
  var ids=data.questions.map(function(q){return q.question_id;});if(ids.some(function(id){return !zip.file('cards/'+id+'.webp');}))throw Error('ZIP 內缺少部分原始題圖，請勿匯入不完整版本。');
  // Validate metadata first, but only activate when all images have been saved.
  var codes=new Set(TOPICS.map(function(t){return t[0];}));if(ids.some(function(id,i){return !id||(!codes.has(data.questions[i].primary_topic_code)&&data.questions[i].primary_topic_code!=='O');}))throw Error('分類代碼含未知值，請檢查索引。');
@@ -215,7 +215,7 @@ async function importZip(file){
  }
  progress.textContent='正在保存780張題圖至本機……';
  var database=await db();await new Promise(function(resolve,reject){var tx=database.transaction('cards','readwrite'),store=tx.objectStore('cards');files.forEach(function(row){store.put(row[1],row[0]);});tx.oncomplete=resolve;tx.onerror=function(){reject(tx.error||Error('存入題圖失敗'));};tx.onabort=function(){reject(tx.error||Error('題庫交易取消'));};});
- Object.values(imageUrls).forEach(function(url){URL.revokeObjectURL(url);});imageUrls={};applyCatalog(data,true);state.packVersion=ASSET_VERSION;save();progress.textContent='v2新版780張題圖匯入完成，上緣裁切已修正。';notify('新版 v2 已匯入：780張題圖已取代舊圖。');refreshAll();
+ Object.values(imageUrls).forEach(function(url){URL.revokeObjectURL(url);});imageUrls={};applyCatalog(data,true);state.packVersion=ASSET_VERSION;save();progress.textContent='v3題圖匯入完成：已改用靜態公式，避免 MathType 轉檔擠壓。';notify('新版 v3 已匯入：780張題圖已取代舊圖。');refreshAll();
 }
 function exportBackup(){var data={format:'math-analyze-records-v1',exported_at:new Date().toISOString(),state:state};download('MathAnalyze_教師紀錄備份_'+new Date().toISOString().slice(0,10)+'.json','application/json;charset=utf-8',JSON.stringify(data,null,2));notify('已下載備份。題圖需另外保留原始 ZIP。');}
 function importBackupFile(file){
@@ -228,7 +228,7 @@ function importBackupFile(file){
 function settings(){
  var len=catalog?catalog.questions.length:0;
  $('packStatus').className='notice '+(state.packVersion===ASSET_VERSION&&len?'success':'warn');
- $('packStatus').textContent=len&&state.packVersion===ASSET_VERSION?'已載入新版 v2 共 '+len+' 題（根式／分式上緣修正版）。題圖與紀錄均在此瀏覽器。':'尚未匯入新版 v2 題圖包，舊版題圖已停用。請下載 v2 ZIP 並重新匯入，原有測驗和學生紀錄會保留。';
+ $('packStatus').textContent=len&&state.packVersion===ASSET_VERSION?'已載入新版 v3 共 '+len+' 題（靜態公式修正版）。題圖與紀錄均在此瀏覽器。':'尚未匯入新版 v3 題圖包，舊版題圖已停用。請下載 v3 ZIP 並重新匯入，原有測驗和學生紀錄會保留。';
 }
 function refreshAll(){refreshStudents();refreshTopics();refreshDashboard();refreshBank();paperList();refreshRecordHistory();report();settings();renderPreview();loadExistingRecord();}
 function switchTab(name){
