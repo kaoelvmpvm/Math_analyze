@@ -5,7 +5,7 @@
 ## 啟用
 
 1. 打開 [GitHub Pages](https://github.com/kaoelvmpvm/Math_analyze/settings/pages)，Source 選 GitHub Actions，網站部署流程會在推送後啟動。
-2. 開啟網站，在「設定／匯入題庫」選擇教師持有的 `Math_analyze_780題原圖包_v2.zip`（包含 `catalog.json` 與 `cards/*.webp`）。
+2. 開啟網站，在「設定／匯入題庫」選擇教師持有的 `Math_analyze_780題原圖包_v3.zip`（包含 `catalog.json` 與 `cards/*.webp`）。
 3. 先建立學生代號，再產生測驗卷、印出試題、登記錯題，下一回測驗就會依紀錄分配考點。
 4. 每次使用後按「下載備份」，保存測驗及學生資料。更換瀏覽器時，可匯入備份；題圖包須另外匯入。
 
@@ -29,3 +29,12 @@ Vanilla JavaScript + IndexedDB + localStorage；僅載入 JSZip 用於教師本�
 ## 題圖裁切修復（2026-10-16）
 
 第一版直接依原PDF文字基線切割，造成高於基線的根號、分式上緣被截斷。現改為將來源Word中的每道題獨立排版並完整輸出後才裁切，重新生成780張WebP。題包的 `metadata.asset_version` 為 `v2-isolated-layout`；舊版題包會被網站拒絕，以避免誤用殘缺題目。重新匯入題包保留學生、考卷及錯題資料，並自動更新瀏覽器圖片快取。
+
+## v3 修復（2026-10-16）
+
+因原始Word有大量 Equation.3/MathType 舊式 OLE 公式，即使逐題切頁，非Windows轉檔引擎仍可能將數字壓縮重疊。v3 改為先將內嵌 WMF/EMF 公式預覽轉成靜態 PNG，移除 OLE 物件，最後才逐題生成 WebP。
+
+- v3 識別碼：`v3-rasterized-ole`；舊 v1/v2 ZIP 不再接受。
+- 無法安全轉換的公式會標記為 `render_integrity=needs_manual_review`，自動出卷一律排除，不能透過「教師核准」覆蓋。
+- 已有考卷與學生紀錄保留，但應重新匯入 v3 ZIP 才能重新預覽或列印。
+- 題庫數學答案的獨立驗算與全部題圖的人工目視確認仍未完成，請勿將候選可用視作正式命題驗收。
