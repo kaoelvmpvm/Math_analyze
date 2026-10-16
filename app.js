@@ -16,7 +16,7 @@ function load(){try{var t=JSON.parse(localStorage.getItem(KEY)||'null');if(t&&Ar
 function applyCatalog(data,persist){
  if(!data||!Array.isArray(data.questions)||!data.questions.length)throw Error('題庫缺少 questions 清單');
  var codes=new Set(TOPICS.map(function(t){return t[0];})),seen=new Set();
- data.questions.forEach(function(q){if(!q.question_id||seen.has(q.question_id)||!codes.has(q.primary_topic_code)&&q.unit!=='待審')throw Error('題庫題號重複或考點代碼無效：'+q.question_id);seen.add(q.question_id);});
+ data.questions.forEach(function(q){if(!q.question_id||seen.has(q.question_id)||!codes.has(q.primary_topic_code)&&q.primary_topic_code!=='O')throw Error('題庫題號重複或考點代碼無效：'+q.question_id);seen.add(q.question_id);});
  catalog=data;byId={};catalog.questions.forEach(function(q){byId[q.question_id]=q;});
  if(persist)try{localStorage.setItem(BANKKEY,JSON.stringify(catalog));}catch(e){throw Error('題庫索引無法儲存至此瀏覽器');}
 }
@@ -136,7 +136,7 @@ function makePaper(){
 }
 function paperList(){
  $('paperList').innerHTML=state.papers.length?state.papers.slice().reverse().map(function(p){return '<div class="item"><div><h4>'+safe(p.title)+'</h4><p>'+safe(String(p.date).slice(0,10))+' · '+p.questionIds.length+'題 · '+p.minutes+'分鐘 · '+(p.mode==='individual'?safe(p.student):'全班')+'</p></div><button class="btn'+(p.id===selectedPaperId?' primary':'')+'" data-paper-id="'+safe(p.id)+'">查看</button></div>';}).join(''):empty('還沒有考卷','請先匯入題圖包，再從左側設定考點與測驗時間。');
- $('recordPaper').innerHTML='<option value="">請選擇試卷</option>'+state.papers.slice().reverse().map(function(p){return '<option value="'+safe(p.id)+'">'+safe(p.title)+'</option>';}).join('');
+ var lastRecordPaper=val('recordPaper');$('recordPaper').innerHTML='<option value="">請選擇試卷</option>'+state.papers.slice().reverse().map(function(p){return '<option value="'+safe(p.id)+'">'+safe(p.title)+'</option>';}).join('');if(lastRecordPaper&&state.papers.some(function(p){return p.id===lastRecordPaper;}))$('recordPaper').value=lastRecordPaper;else if(state.papers.length)$('recordPaper').value=state.papers[state.papers.length-1].id;
 }
 async function renderPreview(){
  var token=++previewToken,p=paperOf(selectedPaperId);
@@ -208,7 +208,7 @@ async function importZip(file){
  var data=JSON.parse(await item.async('string'));if(data.questions.length!==780)throw Error('題庫預期780題，實際'+data.questions.length+'題。');
  var ids=data.questions.map(function(q){return q.question_id;});if(ids.some(function(id){return !zip.file('cards/'+id+'.webp');}))throw Error('ZIP 內缺少部分原始題圖，請勿匯入不完整版本。');
  // Validate metadata first, but only activate when all images have been saved.
- var codes=new Set(TOPICS.map(function(t){return t[0];}));if(ids.some(function(id,i){return !id||(!codes.has(data.questions[i].primary_topic_code)&&data.questions[i].unit!=='待審');}))throw Error('分類代碼含未知值，請檢查索引。');
+ var codes=new Set(TOPICS.map(function(t){return t[0];}));if(ids.some(function(id,i){return !id||(!codes.has(data.questions[i].primary_topic_code)&&data.questions[i].primary_topic_code!=='O');}))throw Error('分類代碼含未知值，請檢查索引。');
  var files=[];for(var i=0;i<ids.length;i++){
   var raw=await zip.file('cards/'+ids[i]+'.webp').async('blob');
   files.push([ids[i],raw]);if((i+1)%80===0){progress.textContent='已解壓 '+(i+1)+'/780 題……';await new Promise(function(ok){setTimeout(ok,0);});}
@@ -230,7 +230,7 @@ function settings(){
  $('packStatus').className='notice '+(state.packVersion&&len?'success':'warn');
  $('packStatus').textContent=len&&state.packVersion?'已載入 '+len+' 題。題圖與紀錄均在此瀏覽器；更換裝置請重新匯入。':'尚未匯入完整題圖包。先匯入後才能排版列印與產生試卷。';
 }
-function refreshAll(){refreshStudents();refreshTopics();refreshDashboard();refreshBank();paperList();refreshRecordHistory();report();settings();renderPreview();refreshRecordGrid();}
+function refreshAll(){refreshStudents();refreshTopics();refreshDashboard();refreshBank();paperList();refreshRecordHistory();report();settings();renderPreview();loadExistingRecord();}
 function switchTab(name){
  document.querySelectorAll('.tab').forEach(function(x){x.classList.toggle('active',x.id===name);});
  document.querySelectorAll('.nav-btn').forEach(function(x){x.classList.toggle('active',x.dataset.target===name);});
