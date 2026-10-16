@@ -5,7 +5,7 @@
 ## 啟用
 
 1. 打開 [GitHub Pages](https://github.com/kaoelvmpvm/Math_analyze/settings/pages)，Source 選 GitHub Actions，網站部署流程會在推送後啟動。
-2. 開啟網站，在「設定／匯入題庫」選擇教師持有的 `Math_analyze_780題原圖包.zip`（包含 `catalog.json` 與 `cards/*.webp`）。
+2. 開啟網站，在「設定／匯入題庫」選擇教師持有的 `Math_analyze_780題原圖包_v2.zip`（包含 `catalog.json` 與 `cards/*.webp`）。
 3. 先建立學生代號，再產生測驗卷、印出試題、登記錯題，下一回測驗就會依紀錄分配考點。
 4. 每次使用後按「下載備份」，保存測驗及學生資料。更換瀏覽器時，可匯入備份；題圖包須另外匯入。
 
@@ -25,3 +25,7 @@
 ## 技術
 
 Vanilla JavaScript + IndexedDB + localStorage；僅載入 JSZip 用於教師本機 ZIP 解壓，無伺服器/API/AI費用。
+
+## 題圖裁切修復（2026-10-16）
+
+第一版直接依原PDF文字基線切割，造成高於基線的根號、分式上緣被截斷。現改為將來源Word中的每道題獨立排版並完整輸出後才裁切，重新生成780張WebP。題包的 `metadata.asset_version` 為 `v2-isolated-layout`；舊版題包會被網站拒絕，以避免誤用殘缺題目。重新匯入題包保留學生、考卷及錯題資料，並自動更新瀏覽器圖片快取。
