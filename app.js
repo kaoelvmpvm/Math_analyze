@@ -211,7 +211,7 @@ async function importZip(file){
  var codes=new Set(TOPICS.map(function(t){return t[0];}));if(ids.some(function(id,i){return !id||(!codes.has(data.questions[i].primary_topic_code)&&data.questions[i].primary_topic_code!=='O');}))throw Error('分類代碼含未知值，請檢查索引。');
  var files=[];for(var i=0;i<ids.length;i++){
   var raw=await zip.file('cards/'+ids[i]+'.webp').async('blob');
-  files.push([ids[i],raw]);if((i+1)%80===0){progress.textContent='已解壓 '+(i+1)+'/780 題……';await new Promise(function(ok){setTimeout(ok,0);});}
+  files.push([ids[i],new Blob([raw],{type:'image/webp'})]);if((i+1)%80===0){progress.textContent='已解壓 '+(i+1)+'/780 題……';await new Promise(function(ok){setTimeout(ok,0);});}
  }
  progress.textContent='正在保存780張題圖至本機……';
  var database=await db();await new Promise(function(resolve,reject){var tx=database.transaction('cards','readwrite'),store=tx.objectStore('cards');files.forEach(function(row){store.put(row[1],row[0]);});tx.oncomplete=resolve;tx.onerror=function(){reject(tx.error||Error('存入題圖失敗'));};tx.onabort=function(){reject(tx.error||Error('題庫交易取消'));};});
