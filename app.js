@@ -91,43 +91,19 @@ function refreshStudents(){
  ['paperStudent','recordStudent'].forEach(function(id){studentOptions(id,false);});studentOptions('reportScope',true);
 }
 function historySeen(id,scope){var x=summarize(scope).seen[id];return x;}
-function weightFor(q,stats,recent,trainingDate){var x=stats.seen[q.question_id],w=1;var days=x?Math.max(0,(trainingStamp(trainingDate)-x.last)/864e5):100;
- if(!x){w=5;}else{
- var miss=(x.wrong+x.blank)/x.attempts;
- w+=Math.min(6,miss*7)+Math.min(2.3,days/3)+(x.attempts<=1?1:0);
- }
- if(recent.has(q.question_id))w*=.055;
- if(q.classification_confidence==='低')w*=.2;
- return Math.max(.01,w);
-}
 function selectQuestions(count,topicCodes,scope,trainingDate){
- var chosen=[],used=new Set(),stats=summarize(scope),recent=new Set();
- state.papers.slice(-2).forEach(function(p){if(scope==='class'||p.mode==='class'||p.student===scope)(p.questionIds||[]).forEach(function(id){recent.add(id);});});
- var groups={};topicCodes.forEach(function(c){groups[c]=[];});
- catalog.questions.forEach(function(q){if(active(q)&&groups[q.primary_topic_code])groups[q.primary_topic_code].push(q);});
- var pool=Object.values(groups).flat();if(pool.length<count)throw Error('可用題數不足：候選 '+pool.length+' 題，需求 '+count+' 題。');
- // 35% is a soft balancing preference, NOT a hard cap. Teacher-selected
- // topics define the scope; an eligible topic can supply all remaining items.
- var preferredPerTopic=Math.max(2,Math.ceil(count*.35)),distribution={};topicCodes.forEach(function(t){distribution[t]=0;});
- while(chosen.length<count){
- var options=[];topicCodes.forEach(function(t){
-  var qs=groups[t].filter(function(q){return !used.has(q.question_id);});if(!qs.length)return;
-  var prev=stats.topics[t],uncovered=prev&&prev.attempts===0?1.45:1,weak=prev&&prev.attempts>=2?(1-prev.correct/prev.attempts)*2:0.5;
-  var balance=(1+weak)*uncovered/(1+distribution[t]*1.7);
-  if(distribution[t]===0)balance*=2.5;
-  // Once a topic exceeds the preferred share, down-weight it but keep it eligible.
-  // This automatically reallocates missing capacity among selected topics.
-  if(distribution[t]>=preferredPerTopic)balance*=.15;
-  options.push({t:t,q:qs,w:balance});
+ if(!catalog||!window.MathAnalyzeAdaptive)throw Error('自適應選題引擎尚未載入，請重新整理網站。');
+ return window.MathAnalyzeAdaptive.generate({
+   questions:catalog.questions,isUsable:active,
+   papers:state.papers,results:state.results,
+   count:count,topics:topicCodes,scope:scope,trainingDate:trainingDate
  });
- if(!options.length)break;
- var t=weighted(options,function(x){return x.w;});var picked=weighted(t.q,function(q){return weightFor(q,stats,recent,trainingDate);});
- if(!picked)break;chosen.push(picked.question_id);used.add(picked.question_id);distribution[t.t]++;
- }
- if(chosen.length!==count)throw Error('所選考點可用題庫不足：需要'+count+'題，僅能取得'+chosen.length+'題。請增加考點或減少題數。');
- return chosen;
 }
-function weighted(arr,fn){if(!arr.length)return null;var values=arr.map(function(x){return Math.max(.01,fn(x));});var sum=values.reduce(function(a,b){return a+b;},0),pick=Math.random()*sum;for(var i=0;i<arr.length;i++){pick-=values[i];if(pick<=0)return arr[i];}return arr[arr.length-1];}
+function selectionSummary(p){
+ var r=p?.selectionReport;
+ if(!r)return '舊版考卷（未保存選題說明）';
+ return '新增原題 '+r.previouslyUnseen+' 題｜補弱類別 '+r.intentCounts.repair+' 題｜近期重複 '+r.recentRepeatCount+' 題'+(r.relaxedProtection?'（因候選題不足已放寬重複限制）':'');
+}
 function makePaper(){
  if(!catalog||state.packVersion!==ASSET_VERSION)return notify('請先在「設定與備份」匯入新版 v5 教師分類的780題完整題圖包。',true);
  var count=parseInt(val('paperCount'),10),minutes=parseInt(val('paperMinutes'),10),trainingDate=val('paperDate'),mode=val('paperMode'),student=mode==='individual'?val('paperStudent'):'';
@@ -136,19 +112,19 @@ function makePaper(){
  if(!validTrainingDate(trainingDate))return notify('請選擇有效的訓練日期。',true);
  if(!Number.isInteger(count)||count<4||count>45)return notify('題數必須在4至45之間。',true);
  if(mode==='individual'&&!student)return notify('請先新增並選擇學生。',true);
- var qs;try{qs=selectQuestions(count,topics,mode==='individual'?student:'class',trainingDate);}catch(e){return notify(e.message,true);}
- var p={id:uid(),title:val('paperTitle').trim()||(trainingDate+' 數學測驗 '+(state.papers.length+1)),date:new Date().toISOString(),trainingDate:trainingDate,minutes:minutes,mode:mode,student:student,questionIds:qs};
- state.papers.push(p);selectedPaperId=p.id;save();notify('已產生 '+count+' 題；可預覽與列印。');refreshAll();switchTab('papers');
+ var plan;try{plan=selectQuestions(count,topics,mode==='individual'?student:'class',trainingDate);}catch(e){return notify(e.message,true);}
+ var p={id:uid(),title:val('paperTitle').trim()||(trainingDate+' 數學測驗 '+(state.papers.length+1)),date:new Date().toISOString(),trainingDate:trainingDate,minutes:minutes,mode:mode,student:student,questionIds:plan.ids,selectionReport:plan.report};
+ state.papers.push(p);selectedPaperId=p.id;save();notify('已產生 '+count+' 題：'+selectionSummary(p));refreshAll();switchTab('papers');
 }
 function paperList(){
- $('paperList').innerHTML=state.papers.length?state.papers.slice().reverse().map(function(p){return '<div class="item"><div><h4>'+safe(p.title)+'</h4><p>'+safe(p.trainingDate||String(p.date).slice(0,10))+' · '+p.questionIds.length+'題 · '+p.minutes+'分鐘 · '+(p.mode==='individual'?safe(p.student):'全班')+'</p></div><button class="btn'+(p.id===selectedPaperId?' primary':'')+'" data-paper-id="'+safe(p.id)+'">查看</button></div>';}).join(''):empty('還沒有考卷','請先匯入題圖包，再從左側設定考點與測驗時間。');
+ $('paperList').innerHTML=state.papers.length?state.papers.slice().reverse().map(function(p){return '<div class="item"><div><h4>'+safe(p.title)+'</h4><p>'+safe(p.trainingDate||String(p.date).slice(0,10))+' · '+p.questionIds.length+'題 · '+p.minutes+'分鐘 · '+(p.mode==='individual'?safe(p.student):'全班')+'</p><p class="small muted">'+safe(selectionSummary(p))+'</p></div><button class="btn'+(p.id===selectedPaperId?' primary':'')+'" data-paper-id="'+safe(p.id)+'">查看</button></div>';}).join(''):empty('還沒有考卷','請先匯入題圖包，再從左側設定考點與測驗時間。');
  var lastRecordPaper=val('recordPaper');$('recordPaper').innerHTML='<option value="">請選擇試卷</option>'+state.papers.slice().reverse().map(function(p){return '<option value="'+safe(p.id)+'">'+safe(p.title)+'</option>';}).join('');if(lastRecordPaper&&state.papers.some(function(p){return p.id===lastRecordPaper;}))$('recordPaper').value=lastRecordPaper;else if(state.papers.length)$('recordPaper').value=state.papers[state.papers.length-1].id;
 }
 async function renderPreview(){
  var token=++previewToken,p=paperOf(selectedPaperId);
  $('printPaper').disabled=!p||state.packVersion!==ASSET_VERSION;$('downloadAnswers').disabled=!p;
  if(!p){$('paperPreview').innerHTML=empty('尚未選擇考卷','出卷後會顯示題圖。');$('paperSelectedLabel').textContent='尚未選擇考卷';return;}if(state.packVersion!==ASSET_VERSION){$('paperPreview').innerHTML=empty('請重新匯入 v5 題圖包','舊版 PDF 切圖可能裁掉根式或分數上緣；匯入新版前暫停顯示與列印。');$('paperSelectedLabel').textContent=p.title;return;}
- $('paperSelectedLabel').textContent=p.title+'｜'+(p.trainingDate||String(p.date||'').slice(0,10))+'｜'+p.questionIds.length+'題｜'+p.minutes+'分鐘';
+ $('paperSelectedLabel').textContent=p.title+'｜'+(p.trainingDate||String(p.date||'').slice(0,10))+'｜'+p.questionIds.length+'題｜'+p.minutes+'分鐘';if($('selectionExplanation')){$('selectionExplanation').className='notice'+(p.selectionReport?.relaxedProtection?' warn':'');$('selectionExplanation').textContent=selectionSummary(p)+'。補弱依九大教師分類，不代表已辨識相同數學概念的變化題。';}
  $('paperPreview').innerHTML='<p class="hint">正在載入來源題圖……</p>';
  var texts=[];
  for(var i=0;i<p.questionIds.length;i++){
@@ -279,15 +255,15 @@ function createStudentBatch(request){
  if(!validTrainingDate(trainingDate))throw Error('請選擇有效的訓練日期。');
  var batchId='batch-'+uid(),batch=[],signatures=new Set(),prefix=String(request.title||'').trim()||(trainingDate+' 數學個別卷');
  students.forEach(function(student){
-   var qs=null,signature='';
+   var plan=null,qs=null,signature='';
    for(var retry=0;retry<8;retry++){
-    qs=selectQuestions(count,topics,student,trainingDate);
+    plan=selectQuestions(count,topics,student,trainingDate);qs=plan.ids;
     signature=qs.slice().sort().join('|');
     if(!signatures.has(signature))break;
    }
    if(signatures.has(signature))throw Error('目前可用題庫無法替所有學生產生互不相同的試卷，請增加考點或減少題數。');
    signatures.add(signature);
-   batch.push({id:uid(),batchId:batchId,title:prefix+'｜'+student,student:student,mode:'individual',minutes:minutes,trainingDate:trainingDate,questionIds:qs,date:new Date().toISOString()});
+   batch.push({id:uid(),batchId:batchId,title:prefix+'｜'+student,student:student,mode:'individual',minutes:minutes,trainingDate:trainingDate,questionIds:qs,selectionReport:plan.report,date:new Date().toISOString()});
  });
  state.papers.push.apply(state.papers,batch);
  selectedPaperId=batch[0].id;
