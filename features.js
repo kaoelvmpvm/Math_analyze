@@ -25,6 +25,7 @@ function renderStudents(){
  container.innerHTML=s.students.length?s.students.map(id=>'<label class="batch-student"><input type="checkbox" data-bulk-student="'+esc(id)+'" '+(selectedIds.has(id)?'checked':'')+'><span>'+esc(id)+'</span></label>').join(''):'<div class="notice warn">目前尚未建立學生代號。請先到「設定與備份」新增學生。</div>';
  $('bulkSelectedCount').textContent='已選 '+selectedIds.size+'／'+s.students.length+' 位';
  $('bulkDownload').disabled=generating||!selectedIds.size||!s.ready;
+ $('bulkMergeExisting').disabled=generating||!selectedIds.size||!s.ready||!s.papers.some(p=>p.mode==='individual'&&selectedIds.has(p.student));
 }
 function renderBatches(){
  const box=$('bulkHistory');if(!box)return;
@@ -36,6 +37,7 @@ function renderBatches(){
 }
 function setBusy(on,message){
  generating=on;$('bulkDownload').disabled=on||!selectedIds.size||!snapshot().ready;
+ $('bulkMergeExisting').disabled=on||!selectedIds.size||!snapshot().ready;
  if($('bulkProgress'))$('bulkProgress').textContent=message||'';
  document.querySelectorAll('[data-bulk-redownload]').forEach(btn=>btn.disabled=on);
 }
@@ -138,6 +140,21 @@ async function runBatch(){
  }catch(err){toast('批次處理未完成：'+err.message,true);setBusy(true,'操作遇到問題：'+err.message+'。如已產生試卷，可在下方「歷次批次」重新下載。');}
  finally{setBusy(false,$('bulkProgress').textContent);}
 }
+
+async function mergeExisting(){
+ if(generating)return;
+ const s=snapshot(),ids=s.students.filter(id=>selectedIds.has(id));
+ const latest=ids.map(id=>s.papers.filter(p=>p.mode==='individual'&&p.student===id).at(-1)).filter(Boolean);
+ const missing=ids.filter(id=>!latest.some(p=>p.student===id));
+ if(!latest.length)return toast('選取的學生尚未產生個別試卷。',true);
+ if(missing.length&&!confirm('有 '+missing.length+' 位學生沒有已建立的個別卷（'+missing.slice(0,5).join('、')+(missing.length>5?'…':'')+'），只合併其餘 '+latest.length+' 位，確定嗎？'))return;
+ if(latest.length>1&&new Set(latest.map(p=>p.minutes+'-'+p.week+'-'+p.questionIds.length)).size>1){
+ if(!confirm('這些學生最新試卷的週次、題數或考試時間不完全相同，仍要合併嗎？'))return;
+ }
+ setBusy(true,'正在合併 '+latest.length+' 份既有個別卷……');
+ try{await combinedPdf(latest);}catch(err){toast('合併失敗：'+err.message,true);}finally{setBusy(false,'');}
+}
+
 function studentData(student){
  const s=snapshot(),papers=new Map(s.papers.map(p=>[p.id,p]));
  const rec=s.results.filter(r=>r.student===student&&papers.has(r.paperId)).sort((a,b)=>new Date(b.date)-new Date(a.date));
@@ -201,6 +218,7 @@ function init(){
  $('bulkSelectNone').onclick=()=>{selectedIds.clear();initialized=true;renderStudents();};
  $('bulkStudentList').addEventListener('change',e=>{const id=e.target.dataset.bulkStudent;if(!id)return;if(e.target.checked)selectedIds.add(id);else selectedIds.delete(id);initialized=true;renderStudents();});
  $('bulkDownload').onclick=runBatch;
+ $('bulkMergeExisting').onclick=mergeExisting;
  $('bulkHistory').addEventListener('click',async e=>{
   const dl=e.target.closest('[data-bulk-redownload]'),ans=e.target.closest('[data-bulk-answers]');
   const id=dl?.dataset.bulkRedownload||ans?.dataset.bulkAnswers;if(!id)return;
