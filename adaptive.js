@@ -25,7 +25,7 @@ function generate(opt){
  const allPapers=opt.papers||[],allResults=opt.results||[],scope=opt.scope||'class';
  const papersById=new Map(allPapers.map(p=>[p.id,p]));
  const attempts=new Map(),assigned=new Map();
- const topics=new Map(topicCodes.map(code=>[code,{attempts:0,wrong:0,blank:0,unique:new Set(),questionPool:0}]));
+ const topics=new Map(topicCodes.map(code=>[code,{attempts:0,wrong:0,blank:0,conceptual:0,careless:0,unclassified:0,unique:new Set(),questionPool:0}]));
  questions.forEach(q=>topics.get(q.primary_topic_code).questionPool++);
  function attempt(id){if(!attempts.has(id))attempts.set(id,{n:0,wrong:0,blank:0,correct:0,lastAt:0,lastStatus:''});return attempts.get(id);}
  function isRelevantPaper(p){return scope==='class'?p.mode==='class':p.mode==='class'||p.student===scope;}
@@ -51,7 +51,13 @@ function generate(opt){
      const state=wrong.has(id)?'wrong':blank.has(id)?'blank':'correct';
      a.n++;a[state]++;a.lastAt=d;a.lastStatus=state;
      t.attempts++;t.unique.add(id);
-     if(state==='wrong')t.wrong++;
+     if(state==='wrong'){
+       t.wrong++;
+       const reason=(r.reasons||{})[id]||'U';
+       if(reason==='C')t.careless++;
+       else if(reason==='K'||reason==='P')t.conceptual++;
+       else t.unclassified++;
+     }
      if(state==='blank')t.blank++;
    });
  });
@@ -102,7 +108,7 @@ function generate(opt){
    }
    if(!candidates.length)throw Error('抽題數量不足，請減少題數或增加已選考點。');
    function topicScore(code){
-     const t=topics.get(code),weightedLoss=t.wrong+.6*t.blank;
+     const t=topics.get(code),weightedLoss=t.conceptual+t.unclassified+.55*t.careless+.6*t.blank;
      const need=(weightedLoss+0.5)/(t.attempts+3);
      const coverage=1/Math.sqrt(1+t.unique.size);
      let s=intent==='repair'?(1+8*need):intent==='explore'?(1+4*coverage+1.2*need):(1+2*need+2*coverage);
