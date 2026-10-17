@@ -105,21 +105,25 @@ function selectQuestions(count,topicCodes,scope,week){
  var groups={};topicCodes.forEach(function(c){groups[c]=[];});
  catalog.questions.forEach(function(q){if(active(q)&&groups[q.primary_topic_code])groups[q.primary_topic_code].push(q);});
  var pool=Object.values(groups).flat();if(pool.length<count)throw Error('可用題數不足：候選 '+pool.length+' 題，需求 '+count+' 題。');
- var maxPerTopic=Math.max(2,Math.ceil(count*.35)),distribution={};topicCodes.forEach(function(t){distribution[t]=0;});
+ // 35% is a soft balancing preference, NOT a hard cap. Teacher-selected
+ // topics define the scope; an eligible topic can supply all remaining items.
+ var preferredPerTopic=Math.max(2,Math.ceil(count*.35)),distribution={};topicCodes.forEach(function(t){distribution[t]=0;});
  while(chosen.length<count){
  var options=[];topicCodes.forEach(function(t){
-  if(distribution[t]>=maxPerTopic)return;
   var qs=groups[t].filter(function(q){return !used.has(q.question_id);});if(!qs.length)return;
   var prev=stats.topics[t],uncovered=prev&&prev.attempts===0?1.45:1,weak=prev&&prev.attempts>=2?(1-prev.correct/prev.attempts)*2:0.5;
   var balance=(1+weak)*uncovered/(1+distribution[t]*1.7);
   if(distribution[t]===0)balance*=2.5;
+  // Once a topic exceeds the preferred share, down-weight it but keep it eligible.
+  // This automatically reallocates missing capacity among selected topics.
+  if(distribution[t]>=preferredPerTopic)balance*=.15;
   options.push({t:t,q:qs,w:balance});
  });
  if(!options.length)break;
  var t=weighted(options,function(x){return x.w;});var picked=weighted(t.q,function(q){return weightFor(q,stats,week,recent);});
  if(!picked)break;chosen.push(picked.question_id);used.add(picked.question_id);distribution[t.t]++;
  }
- if(chosen.length!==count)throw Error('題型與每考點上限限制下，只能抽出'+chosen.length+'題。請減少題數或增加考點。');
+ if(chosen.length!==count)throw Error('所選考點可用題庫不足：需要'+count+'題，僅能取得'+chosen.length+'題。請增加考點或減少題數。');
  return chosen;
 }
 function weighted(arr,fn){if(!arr.length)return null;var values=arr.map(function(x){return Math.max(.01,fn(x));});var sum=values.reduce(function(a,b){return a+b;},0),pick=Math.random()*sum;for(var i=0;i<arr.length;i++){pick-=values[i];if(pick<=0)return arr[i];}return arr[arr.length-1];}
