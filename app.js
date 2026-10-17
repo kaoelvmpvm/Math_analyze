@@ -9,6 +9,9 @@ function val(id){return $(id)?$(id).value:'';}
 function num(n){return Math.round((n||0)*10)/10;}
 function fmt(v){return Number.isFinite(v)?num(v).toString():'—';}
 function today(){return new Date().toLocaleDateString('zh-TW');}
+function localISODate(){var d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);}
+function validTrainingDate(d){if(!/^\d{4}-\d{2}-\d{2}$/.test(String(d||'')))return false;var x=new Date(d+'T12:00:00');return !isNaN(x.getTime())&&new Date(x.getTime()-x.getTimezoneOffset()*60000).toISOString().slice(0,10)===d;}
+function trainingStamp(d){return Date.parse((validTrainingDate(d)?d:localISODate())+'T12:00:00');}
 function uid(){return Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7);}
 function notify(msg,err){document.querySelectorAll('.toast').forEach(function(e){e.remove();});var x=document.createElement('div');x.className='toast'+(err?' error':'');x.textContent=msg;document.body.appendChild(x);setTimeout(function(){x.remove();},4100);}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){notify('瀏覽器儲存空間不足，請先下載紀錄備份。',true);}}
@@ -37,8 +40,8 @@ function summarize(scope){
  results.forEach(function(r){var p=paperOf(r.paperId);if(!p)return;var wrong=new Set(r.wrong||[]),blank=new Set(r.blank||[]);var rc=0,rt=0;minutes+=Number(r.minutes)||0;
  (p.questionIds||[]).forEach(function(id){var q=byId[id];if(!q)return;var code=q.primary_topic_code, isW=wrong.has(id),isB=blank.has(id),good=!isW&&!isB;
  var z=topics[code];if(!z)return;
- z.attempts++;z.correct+=good?1:0;z.wrong+=isW?1:0;z.blank+=isB?1:0;z.dates.add(String(r.date||'').slice(0,10));z.questionIds.add(id);
- if(!seen[id])seen[id]={attempts:0,wrong:0,blank:0,last:0};seen[id].attempts++;seen[id].wrong+=isW?1:0;seen[id].blank+=isB?1:0;seen[id].last=Math.max(seen[id].last,Date.parse(r.date||'')||0);
+ z.attempts++;z.correct+=good?1:0;z.wrong+=isW?1:0;z.blank+=isB?1:0;z.dates.add(String(p.trainingDate||r.date||'').slice(0,10));z.questionIds.add(id);
+ if(!seen[id])seen[id]={attempts:0,wrong:0,blank:0,last:0};seen[id].attempts++;seen[id].wrong+=isW?1:0;seen[id].blank+=isB?1:0;seen[id].last=Math.max(seen[id].last,Date.parse(p.trainingDate?p.trainingDate+'T12:00:00':r.date||'')||0);
  if(isW){wrongTotal++;if((r.reasons||{})[id]==='C')confirmedCareless++;}if(isB)unanswered++;
  total++;rt++;if(good){correct++;rc++;}
  });
@@ -88,18 +91,16 @@ function refreshStudents(){
  ['paperStudent','recordStudent'].forEach(function(id){studentOptions(id,false);});studentOptions('reportScope',true);
 }
 function historySeen(id,scope){var x=summarize(scope).seen[id];return x;}
-function weightFor(q,stats,week,recent){var x=stats.seen[q.question_id],w=1;var days=x?Math.max(0,(Date.now()-x.last)/864e5):100;
- if(!x){w=week==1?5.5:week==2?5:3.3;}else{
+function weightFor(q,stats,recent,trainingDate){var x=stats.seen[q.question_id],w=1;var days=x?Math.max(0,(trainingStamp(trainingDate)-x.last)/864e5):100;
+ if(!x){w=5;}else{
  var miss=(x.wrong+x.blank)/x.attempts;
  w+=Math.min(6,miss*7)+Math.min(2.3,days/3)+(x.attempts<=1?1:0);
- if(week==3||week==6)w+=miss*3;
- if(week==4||week==5)w+=x.attempts>=2&&miss<.15?1:0;
  }
  if(recent.has(q.question_id))w*=.055;
  if(q.classification_confidence==='低')w*=.2;
  return Math.max(.01,w);
 }
-function selectQuestions(count,topicCodes,scope,week){
+function selectQuestions(count,topicCodes,scope,trainingDate){
  var chosen=[],used=new Set(),stats=summarize(scope),recent=new Set();
  state.papers.slice(-2).forEach(function(p){if(scope==='class'||p.mode==='class'||p.student===scope)(p.questionIds||[]).forEach(function(id){recent.add(id);});});
  var groups={};topicCodes.forEach(function(c){groups[c]=[];});
@@ -120,7 +121,7 @@ function selectQuestions(count,topicCodes,scope,week){
   options.push({t:t,q:qs,w:balance});
  });
  if(!options.length)break;
- var t=weighted(options,function(x){return x.w;});var picked=weighted(t.q,function(q){return weightFor(q,stats,week,recent);});
+ var t=weighted(options,function(x){return x.w;});var picked=weighted(t.q,function(q){return weightFor(q,stats,recent,trainingDate);});
  if(!picked)break;chosen.push(picked.question_id);used.add(picked.question_id);distribution[t.t]++;
  }
  if(chosen.length!==count)throw Error('所選考點可用題庫不足：需要'+count+'題，僅能取得'+chosen.length+'題。請增加考點或減少題數。');
@@ -129,24 +130,25 @@ function selectQuestions(count,topicCodes,scope,week){
 function weighted(arr,fn){if(!arr.length)return null;var values=arr.map(function(x){return Math.max(.01,fn(x));});var sum=values.reduce(function(a,b){return a+b;},0),pick=Math.random()*sum;for(var i=0;i<arr.length;i++){pick-=values[i];if(pick<=0)return arr[i];}return arr[arr.length-1];}
 function makePaper(){
  if(!catalog||state.packVersion!==ASSET_VERSION)return notify('請先在「設定與備份」匯入新版 v5 教師分類的780題完整題圖包。',true);
- var count=parseInt(val('paperCount'),10),minutes=parseInt(val('paperMinutes'),10),week=parseInt(val('paperWeek'),10),mode=val('paperMode'),student=mode==='individual'?val('paperStudent'):'';
+ var count=parseInt(val('paperCount'),10),minutes=parseInt(val('paperMinutes'),10),trainingDate=val('paperDate'),mode=val('paperMode'),student=mode==='individual'?val('paperStudent'):'';
  var topics=Array.from(document.querySelectorAll('#paperTopics input:checked')).map(function(x){return x.value;});
  if(!topics.length)return notify('請至少勾選一個考點。',true);
+ if(!validTrainingDate(trainingDate))return notify('請選擇有效的訓練日期。',true);
  if(!Number.isInteger(count)||count<4||count>45)return notify('題數必須在4至45之間。',true);
  if(mode==='individual'&&!student)return notify('請先新增並選擇學生。',true);
- var qs;try{qs=selectQuestions(count,topics,mode==='individual'?student:'class',week);}catch(e){return notify(e.message,true);}
- var p={id:uid(),title:val('paperTitle').trim()||('第'+week+'週 '+minutes+'分鐘數學測驗 '+(state.papers.length+1)),date:new Date().toISOString(),minutes:minutes,week:week,mode:mode,student:student,questionIds:qs};
+ var qs;try{qs=selectQuestions(count,topics,mode==='individual'?student:'class',trainingDate);}catch(e){return notify(e.message,true);}
+ var p={id:uid(),title:val('paperTitle').trim()||(trainingDate+' 數學測驗 '+(state.papers.length+1)),date:new Date().toISOString(),trainingDate:trainingDate,minutes:minutes,mode:mode,student:student,questionIds:qs};
  state.papers.push(p);selectedPaperId=p.id;save();notify('已產生 '+count+' 題；可預覽與列印。');refreshAll();switchTab('papers');
 }
 function paperList(){
- $('paperList').innerHTML=state.papers.length?state.papers.slice().reverse().map(function(p){return '<div class="item"><div><h4>'+safe(p.title)+'</h4><p>'+safe(String(p.date).slice(0,10))+' · '+p.questionIds.length+'題 · '+p.minutes+'分鐘 · '+(p.mode==='individual'?safe(p.student):'全班')+'</p></div><button class="btn'+(p.id===selectedPaperId?' primary':'')+'" data-paper-id="'+safe(p.id)+'">查看</button></div>';}).join(''):empty('還沒有考卷','請先匯入題圖包，再從左側設定考點與測驗時間。');
+ $('paperList').innerHTML=state.papers.length?state.papers.slice().reverse().map(function(p){return '<div class="item"><div><h4>'+safe(p.title)+'</h4><p>'+safe(p.trainingDate||String(p.date).slice(0,10))+' · '+p.questionIds.length+'題 · '+p.minutes+'分鐘 · '+(p.mode==='individual'?safe(p.student):'全班')+'</p></div><button class="btn'+(p.id===selectedPaperId?' primary':'')+'" data-paper-id="'+safe(p.id)+'">查看</button></div>';}).join(''):empty('還沒有考卷','請先匯入題圖包，再從左側設定考點與測驗時間。');
  var lastRecordPaper=val('recordPaper');$('recordPaper').innerHTML='<option value="">請選擇試卷</option>'+state.papers.slice().reverse().map(function(p){return '<option value="'+safe(p.id)+'">'+safe(p.title)+'</option>';}).join('');if(lastRecordPaper&&state.papers.some(function(p){return p.id===lastRecordPaper;}))$('recordPaper').value=lastRecordPaper;else if(state.papers.length)$('recordPaper').value=state.papers[state.papers.length-1].id;
 }
 async function renderPreview(){
  var token=++previewToken,p=paperOf(selectedPaperId);
  $('printPaper').disabled=!p||state.packVersion!==ASSET_VERSION;$('downloadAnswers').disabled=!p;
  if(!p){$('paperPreview').innerHTML=empty('尚未選擇考卷','出卷後會顯示題圖。');$('paperSelectedLabel').textContent='尚未選擇考卷';return;}if(state.packVersion!==ASSET_VERSION){$('paperPreview').innerHTML=empty('請重新匯入 v5 題圖包','舊版 PDF 切圖可能裁掉根式或分數上緣；匯入新版前暫停顯示與列印。');$('paperSelectedLabel').textContent=p.title;return;}
- $('paperSelectedLabel').textContent=p.title+'｜'+p.questionIds.length+'題｜'+p.minutes+'分鐘';
+ $('paperSelectedLabel').textContent=p.title+'｜'+(p.trainingDate||String(p.date||'').slice(0,10))+'｜'+p.questionIds.length+'題｜'+p.minutes+'分鐘';
  $('paperPreview').innerHTML='<p class="hint">正在載入來源題圖……</p>';
  var texts=[];
  for(var i=0;i<p.questionIds.length;i++){
@@ -161,7 +163,7 @@ function answersCsv(){var p=paperOf(selectedPaperId);if(!p)return;csvDownload('�
 async function printCurrent(){
  var p=paperOf(selectedPaperId);if(!p)return;if(state.packVersion!==ASSET_VERSION){notify('舊圖包已停用；請先匯入v5題圖包。',true);return;}
  var cards=[];for(var i=0;i<p.questionIds.length;i++){var id=p.questionIds[i],u=await cardUrl(id);if(!u){notify('缺少原題圖：'+id+'，請重新匯入題包。',true);return;}cards.push('<div class="print-q"><div class="num">第 '+(i+1)+' 題</div><img src="'+u+'" alt="第'+(i+1)+'題"></div>');}
- $('print-root').innerHTML='<div class="print-hdr"><h2>'+safe(p.title)+'</h2><p>座號：＿＿＿＿　姓名：＿＿＿＿　　測驗時間：'+p.minutes+' 分鐘　　共 '+p.questionIds.length+' 題</p></div>'+cards.join('')+'<div class="answerpage"><h2>教師用答案卷（來源答案，請覆核）</h2><p>'+safe(p.title)+'</p><div class="answergrid">'+p.questionIds.map(function(id,i){return '<div>'+(i+1)+'. '+safe(byId[id].answer_as_provided)+'</div>';}).join('')+'</div></div>';
+ $('print-root').innerHTML='<div class="print-hdr"><h2>'+safe(p.title)+'</h2><p>座號：＿＿＿＿　姓名：＿＿＿＿　　訓練日期：'+safe(p.trainingDate||String(p.date||'').slice(0,10))+'　　測驗時間：'+p.minutes+' 分鐘　　共 '+p.questionIds.length+' 題</p></div>'+cards.join('')+'<div class="answerpage"><h2>教師用答案卷（來源答案，請覆核）</h2><p>'+safe(p.title)+'</p><div class="answergrid">'+p.questionIds.map(function(id,i){return '<div>'+(i+1)+'. '+safe(byId[id].answer_as_provided)+'</div>';}).join('')+'</div></div>';
  var imgs=Array.from($('print-root').querySelectorAll('img'));
  await Promise.all(imgs.map(function(im){return im.complete?Promise.resolve():new Promise(function(ok){im.onload=im.onerror=ok;});}));
  window.print();
@@ -187,7 +189,7 @@ function saveRecord(){
 }
 function refreshRecordHistory(){
  var rec=state.results.slice().reverse();
- $('recordHistory').innerHTML=rec.length?rec.slice(0,30).map(function(r){var p=paperOf(r.paperId),count=p?p.questionIds.length:0,correct=count-(r.wrong||[]).length-(r.blank||[]).length;return '<div class="item"><div><h4>'+safe(r.student)+' · '+safe(p?.title||'舊測驗')+'</h4><p>'+safe(String(r.date||'').slice(0,10))+' · '+r.minutes+'分鐘 · '+count+'題</p></div><span class="chip '+(count&&correct/count>=.8?'ok':'wait')+'">'+correct+'/'+count+'</span></div>';}).join(''):empty('尚無作答紀錄','選好考卷與學生後，只需標記錯題與空白題。');
+ $('recordHistory').innerHTML=rec.length?rec.slice(0,30).map(function(r){var p=paperOf(r.paperId),count=p?p.questionIds.length:0,correct=count-(r.wrong||[]).length-(r.blank||[]).length;return '<div class="item"><div><h4>'+safe(r.student)+' · '+safe(p?.title||'舊測驗')+'</h4><p>'+safe(p?.trainingDate||String(r.date||'').slice(0,10))+' · '+r.minutes+'分鐘 · '+count+'題</p></div><span class="chip '+(count&&correct/count>=.8?'ok':'wait')+'">'+correct+'/'+count+'</span></div>';}).join(''):empty('尚無作答紀錄','選好考卷與學生後，只需標記錯題與空白題。');
 }
 function pct(n){return (100*n).toFixed(1)+'%';}
 function report(){
@@ -269,22 +271,23 @@ function events(){
 function createStudentBatch(request){
  if(!catalog||state.packVersion!==ASSET_VERSION)throw Error('請先匯入 v5 題圖包。');
  var students=(request.students||[]).filter(function(x,i,arr){return state.students.includes(x)&&arr.indexOf(x)===i;});
- var count=Number(request.count),minutes=Number(request.minutes),week=Number(request.week),topics=(request.topics||[]).filter(function(x){return TOPICS.some(function(t){return t[0]===x;});});
+ var count=Number(request.count),minutes=Number(request.minutes),trainingDate=request.trainingDate,topics=(request.topics||[]).filter(function(x){return TOPICS.some(function(t){return t[0]===x;});});
  if(!students.length)throw Error('請至少選擇一位已建立的學生。');
  if(students.length>40)throw Error('一次最多處理40位學生；請分批下載以避免瀏覽器記憶體不足。');
  if(!Number.isInteger(count)||count<4||count>45||!Number.isFinite(minutes)||minutes<=0)throw Error('請檢查題數與測驗時間。');
  if(!topics.length)throw Error('請至少選擇一項考點。');
- var batchId='batch-'+uid(),batch=[],signatures=new Set(),prefix=String(request.title||'').trim()||('第'+week+'週數學個別卷');
+ if(!validTrainingDate(trainingDate))throw Error('請選擇有效的訓練日期。');
+ var batchId='batch-'+uid(),batch=[],signatures=new Set(),prefix=String(request.title||'').trim()||(trainingDate+' 數學個別卷');
  students.forEach(function(student){
    var qs=null,signature='';
    for(var retry=0;retry<8;retry++){
-    qs=selectQuestions(count,topics,student,week);
+    qs=selectQuestions(count,topics,student,trainingDate);
     signature=qs.slice().sort().join('|');
     if(!signatures.has(signature))break;
    }
    if(signatures.has(signature))throw Error('目前可用題庫無法替所有學生產生互不相同的試卷，請增加考點或減少題數。');
    signatures.add(signature);
-   batch.push({id:uid(),batchId:batchId,title:prefix+'｜'+student,student:student,mode:'individual',minutes:minutes,week:week,questionIds:qs,date:new Date().toISOString()});
+   batch.push({id:uid(),batchId:batchId,title:prefix+'｜'+student,student:student,mode:'individual',minutes:minutes,trainingDate:trainingDate,questionIds:qs,date:new Date().toISOString()});
  });
  state.papers.push.apply(state.papers,batch);
  selectedPaperId=batch[0].id;
@@ -300,5 +303,5 @@ window.MathAnalyzeExtensionAPI={
  openTab:switchTab
 };
 
-load();events();refreshAll();
+load();events();if($('paperDate'))$('paperDate').value=localISODate();refreshAll();
 })();
