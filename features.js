@@ -32,7 +32,7 @@ function renderBatches(){
  const groups=batchGroups();
  box.innerHTML=groups.length?groups.slice(0,10).map(([id,papers])=>{
   let dt=papers[0]?.date||'';
-  return '<div class="batch-history-item"><span><strong>'+esc(papers[0].title.replace(/｜[^｜]+$/,''))+'</strong><small>'+esc(dt.slice(0,10))+' · '+papers.length+' 位 · '+papers[0].questionIds.length+'題／人</small></span><span class="actions"><button class="btn" data-bulk-redownload="'+esc(id)+'">下載合併PDF</button><button class="btn" data-bulk-answers="'+esc(id)+'">答案CSV</button></span></div>';
+  return '<div class="batch-history-item"><span><strong>'+esc(papers[0].title.replace(/｜[^｜]+$/,''))+'</strong><small>'+esc(papers[0].trainingDate||dt.slice(0,10))+' · '+papers.length+' 位 · '+papers[0].questionIds.length+'題／人</small></span><span class="actions"><button class="btn" data-bulk-redownload="'+esc(id)+'">下載合併PDF</button><button class="btn" data-bulk-answers="'+esc(id)+'">答案CSV</button></span></div>';
  }).join(''):'<p class="hint">尚無已建立的批次個別卷。按上方「批次產生並下載」即可開始。</p>';
 }
 function setBusy(on,message){
@@ -70,7 +70,7 @@ function headerPng(p,continued){
  ctx.font='bold 51px "Microsoft JhengHei","Noto Sans TC",sans-serif';
  ctx.fillText((p.title||'數學個別卷').slice(0,31),22,67,1440);
  ctx.font='34px "Microsoft JhengHei","Noto Sans TC",sans-serif';
- ctx.fillText('學生代號：'+p.student+'    測驗時間：'+p.minutes+'分鐘    題數：'+p.questionIds.length+'題'+(continued?'    （續頁）':''),22,127,1440);
+ ctx.fillText('訓練日期：'+(p.trainingDate||String(p.date||'').slice(0,10))+'    學生代號：'+p.student+'    時間：'+p.minutes+'分鐘    題數：'+p.questionIds.length+'題'+(continued?'    （續頁）':''),22,127,1440);
  ctx.strokeStyle='#92a5b8';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(22,165);ctx.lineTo(1470,165);ctx.stroke();
  return c.toDataURL('image/png');
 }
@@ -129,12 +129,13 @@ async function runBatch(){
  const s=snapshot(),ids=s.students.filter(id=>selectedIds.has(id));
  if(!ids.length)return toast('請先選擇學生。',true);
  if(!s.ready)return toast('請先在設定與備份匯入 v5 題圖包。',true);
- const count=Number($('paperCount').value),minutes=Number($('paperMinutes').value),week=Number($('paperWeek').value),topics=selectedTopics();
+ const count=Number($('paperCount').value),minutes=Number($('paperMinutes').value),trainingDate=$('paperDate').value,topics=selectedTopics();
  if(!topics.length)return toast('至少選擇一個考點。',true);
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(trainingDate))return toast('請選擇訓練日期。',true);
  if(ids.length*count>700&&!confirm('此次共 '+ids.length*count+' 題，合併 PDF 可能需要較長時間及記憶體。仍要繼續嗎？'))return;
  setBusy(true,'正在為 '+ids.length+' 位學生選題……');
  try{
-  const papers=API.createBatch({students:ids,count,minutes,week,topics,title:$('paperTitle').value});
+  const papers=API.createBatch({students:ids,count,minutes,trainingDate,topics,title:$('paperTitle').value});
   renderBatches();
   await combinedPdf(papers);
  }catch(err){toast('批次處理未完成：'+err.message,true);setBusy(true,'操作遇到問題：'+err.message+'。如已產生試卷，可在下方「歷次批次」重新下載。');}
@@ -148,8 +149,8 @@ async function mergeExisting(){
  const missing=ids.filter(id=>!latest.some(p=>p.student===id));
  if(!latest.length)return toast('選取的學生尚未產生個別試卷。',true);
  if(missing.length&&!confirm('有 '+missing.length+' 位學生沒有已建立的個別卷（'+missing.slice(0,5).join('、')+(missing.length>5?'…':'')+'），只合併其餘 '+latest.length+' 位，確定嗎？'))return;
- if(latest.length>1&&new Set(latest.map(p=>p.minutes+'-'+p.week+'-'+p.questionIds.length)).size>1){
- if(!confirm('這些學生最新試卷的週次、題數或考試時間不完全相同，仍要合併嗎？'))return;
+ if(latest.length>1&&new Set(latest.map(p=>p.minutes+'-'+(p.trainingDate||String(p.date||'').slice(0,10))+'-'+p.questionIds.length)).size>1){
+ if(!confirm('這些學生最新試卷的訓練日期、題數或考試時間不完全相同，仍要合併嗎？'))return;
  }
  setBusy(true,'正在合併 '+latest.length+' 份既有個別卷……');
  try{await combinedPdf(latest);}catch(err){toast('合併失敗：'+err.message,true);}finally{setBusy(false,'');}
@@ -174,7 +175,7 @@ function studentData(student){
    if(status==='wrong'){wrong++;if(topic)topic.wrong++;}
    else{blank++;if(topic)topic.blank++;}
    times.set(id,(times.get(id)||0)+1);unique.add(id);
-   errors.push({id,order:index+1,status,topic:q.teacher_category_label||q.primary_topic||'待核對',reason:r.reasons?.[id]||'U',paper:p.title,date:String(r.date||'').slice(0,10)});
+   errors.push({id,order:index+1,status,topic:q.teacher_category_label||q.primary_topic||'待核對',reason:r.reasons?.[id]||'U',paper:p.title,date:p.trainingDate||String(r.date||'').slice(0,10)});
   });
  });
  return {rec,topics,errors,times,unique,total,correct,wrong,blank,minutes};
