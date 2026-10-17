@@ -230,7 +230,7 @@ function settings(){
  $('packStatus').className='notice '+(state.packVersion===ASSET_VERSION&&len?'success':'warn');
  $('packStatus').textContent=len&&state.packVersion===ASSET_VERSION?'已載入新版 v5 共 '+len+' 題（保留PDF原圖；按教師九類分類）。題圖與紀錄均在此瀏覽器。':'尚未匯入新版 v5 題圖包，舊版題圖已停用。請下載 v5 ZIP 並重新匯入，原有測驗和學生紀錄會保留。';
 }
-function refreshAll(){refreshStudents();refreshTopics();refreshDashboard();refreshBank();paperList();refreshRecordHistory();report();settings();renderPreview();loadExistingRecord();}
+function refreshAll(){refreshStudents();refreshTopics();refreshDashboard();refreshBank();paperList();refreshRecordHistory();report();settings();renderPreview();loadExistingRecord();if(window.MathAnalyzeExtensions?.refresh)window.MathAnalyzeExtensions.refresh();}
 function switchTab(name){
  document.querySelectorAll('.tab').forEach(function(x){x.classList.toggle('active',x.id===name);});
  document.querySelectorAll('.nav-btn').forEach(function(x){x.classList.toggle('active',x.dataset.target===name);});
@@ -254,12 +254,47 @@ function events(){
  $('paperTopics').addEventListener('change',function(){var n=Array.from(document.querySelectorAll('#paperTopics input:checked')).length;$('candidateCount').textContent='已選 '+n+' 個考點';});
  $('makePaper').onclick=makePaper;$('printPaper').onclick=printCurrent;$('downloadAnswers').onclick=answersCsv;
  $('recordPaper').onchange=loadExistingRecord;$('recordStudent').onchange=loadExistingRecord;$('saveRecord').onclick=saveRecord;
- $('reportScope').onchange=report;$('exportReport').onclick=exportReport;
+ $('reportScope').onchange=function(){report();if(window.MathAnalyzeExtensions?.refresh)window.MathAnalyzeExtensions.refresh();};$('exportReport').onclick=exportReport;
  $('importPack').onclick=function(){$('importInput').click();};$('importInput').onchange=async function(){var file=this.files[0];if(!file)return;$('importPack').disabled=true;try{await importZip(file);}catch(e){notify('題庫匯入失敗：'+e.message,true);$('importProgress').textContent=e.message;}finally{$('importPack').disabled=false;this.value='';}};
  $('addStudent').onclick=function(){addStudent(val('studentInput'));};$('studentInput').addEventListener('keydown',function(e){if(e.key==='Enter')addStudent(val('studentInput'));});
  $('addClassBatch').onclick=function(){var prefix=window.prompt('輸入班級代碼（建立 01～35 號，僅作匿名識別）','815');if(prefix===null)return;prefix=prefix.trim().slice(0,20);if(!prefix)return;for(var i=1;i<=35;i++){var v=prefix+'-'+String(i).padStart(2,'0');if(!state.students.includes(v))state.students.push(v);}state.students.sort();save();refreshAll();notify('學生代號已更新');};
  $('exportBackup').onclick=exportBackup;$('importBackup').onclick=function(){$('backupInput').click();};$('backupInput').onchange=function(){if(this.files[0])importBackupFile(this.files[0]);this.value='';};
  $('resetData').onclick=function(){if(window.confirm('確定清空本機所有學生、考卷與作答紀錄？此動作不可復原，請先下載備份。')&&window.confirm('再次確認：清除所有學生、考卷、錯題紀錄與教師覆核狀態？')){state={students:[],papers:[],results:[],overrides:{},packVersion:state.packVersion};selectedPaperId='';save();refreshAll();notify('已清除本機登記紀錄。');}};
 }
+
+function createStudentBatch(request){
+ if(!catalog||state.packVersion!==ASSET_VERSION)throw Error('請先匯入 v5 題圖包。');
+ var students=(request.students||[]).filter(function(x,i,arr){return state.students.includes(x)&&arr.indexOf(x)===i;});
+ var count=Number(request.count),minutes=Number(request.minutes),week=Number(request.week),topics=(request.topics||[]).filter(function(x){return TOPICS.some(function(t){return t[0]===x;});});
+ if(!students.length)throw Error('請至少選擇一位已建立的學生。');
+ if(students.length>40)throw Error('一次最多處理40位學生；請分批下載以避免瀏覽器記憶體不足。');
+ if(!Number.isInteger(count)||count<4||count>45||!Number.isFinite(minutes)||minutes<=0)throw Error('請檢查題數與測驗時間。');
+ if(!topics.length)throw Error('請至少選擇一項考點。');
+ var batchId='batch-'+uid(),batch=[],signatures=new Set(),prefix=String(request.title||'').trim()||('第'+week+'週數學個別卷');
+ students.forEach(function(student){
+   var qs=null,signature='';
+   for(var retry=0;retry<8;retry++){
+    qs=selectQuestions(count,topics,student,week);
+    signature=qs.slice().sort().join('|');
+    if(!signatures.has(signature))break;
+   }
+   if(signatures.has(signature))throw Error('目前可用題庫無法替所有學生產生互不相同的試卷，請增加考點或減少題數。');
+   signatures.add(signature);
+   batch.push({id:uid(),batchId:batchId,title:prefix+'｜'+student,student:student,mode:'individual',minutes:minutes,week:week,questionIds:qs,date:new Date().toISOString()});
+ });
+ state.papers.push.apply(state.papers,batch);
+ selectedPaperId=batch[0].id;
+ save();refreshAll();
+ return batch;
+}
+window.MathAnalyzeExtensionAPI={
+ snapshot:function(){return {students:state.students.slice(),papers:state.papers.slice(),results:state.results.slice(),topics:TOPICS.map(function(x){return x.slice();}),ready:!!catalog&&state.packVersion===ASSET_VERSION};},
+ question:function(id){return byId[id]||null;},
+ imageBlob:blobFor,
+ createBatch:createStudentBatch,
+ toast:notify,
+ openTab:switchTab
+};
+
 load();events();refreshAll();
 })();
