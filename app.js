@@ -102,7 +102,7 @@ function selectQuestions(count,topicCodes,scope,trainingDate){
 function selectionSummary(p){
  var r=p?.selectionReport;
  if(!r)return '舊版考卷（未保存選題說明）';
- return '新增原題 '+r.previouslyUnseen+' 題｜補弱類別 '+r.intentCounts.repair+' 題｜近期重複 '+r.recentRepeatCount+' 題'+(r.relaxedProtection?'（因候選題不足已放寬重複限制）':'');
+ return '新增原題 '+r.previouslyUnseen+' 題｜補弱類別 '+r.intentCounts.repair+' 題｜探索 '+r.intentCounts.explore+' 題｜維持 '+r.intentCounts.review+' 題｜近期重複 '+r.recentRepeatCount+' 題'+(r.weakTopics?.length?'｜曾失分類別：'+r.weakTopics.map(topicName).join('、'):'｜尚無已登記失分考點')+(r.relaxedProtection?'（因候選題不足已放寬重複限制）':'');
 }
 function makePaper(){
  if(!catalog||state.packVersion!==ASSET_VERSION)return notify('請先在「設定與備份」匯入新版 v5 教師分類的780題完整題圖包。',true);
