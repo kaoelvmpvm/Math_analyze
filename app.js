@@ -35,9 +35,9 @@ function empty(title,detail){return '<div class="empty"><h3>'+safe(title)+'</h3>
 function paperOf(id){return state.papers.find(function(p){return p.id===id;});}
 function resultsFor(scope){return state.results.filter(function(r){return scope==='class'||r.student===scope;});}
 function summarize(scope){
- var results=resultsFor(scope),seen={},topics={},correct=0,total=0,minutes=0,confirmedCareless=0,wrongTotal=0,unanswered=0,perResult=[];
+ var results=resultsFor(scope),paperLookup=new Map(state.papers.map(function(p){return [p.id,p];})),seen={},topics={},correct=0,total=0,minutes=0,confirmedCareless=0,wrongTotal=0,unanswered=0,perResult=[];
  TOPICS.forEach(function(t){topics[t[0]]={attempts:0,correct:0,questionIds:new Set(),dates:new Set(),wrong:0,blank:0};});
- results.forEach(function(r){var p=paperOf(r.paperId);if(!p)return;var wrong=new Set(r.wrong||[]),blank=new Set(r.blank||[]);var rc=0,rt=0;minutes+=Number(r.minutes)||0;
+ results.forEach(function(r){var p=paperLookup.get(r.paperId);if(!p)return;var wrong=new Set(r.wrong||[]),blank=new Set(r.blank||[]);var rc=0,rt=0;minutes+=Number(r.minutes)||0;
  (p.questionIds||[]).forEach(function(id){var q=byId[id];if(!q)return;var code=q.primary_topic_code, isW=wrong.has(id),isB=blank.has(id),good=!isW&&!isB;
  var z=topics[code];if(!z)return;
  z.attempts++;z.correct+=good?1:0;z.wrong+=isW?1:0;z.blank+=isB?1:0;z.dates.add(String(p.trainingDate||r.date||'').slice(0,10));z.questionIds.add(id);
@@ -203,18 +203,22 @@ function recordDetailHtml(rows,student){
 }
 function refreshRecordHistory(){
  var box=$('recordHistory');if(!box)return;
- var students=rosterStudents(),dates=new Set([localISODate()]);
+ var students=rosterStudents(),dates=new Set([localISODate()]),paperLookup=new Map(state.papers.map(function(p){return [p.id,p];})),byDay=new Map();
  state.papers.forEach(function(p){if(p.trainingDate||p.date)dates.add(String(p.trainingDate||p.date).slice(0,10));});
- state.results.forEach(function(r){dates.add(trainingDayForRecord(r));});
+ state.results.forEach(function(r){
+  var p=paperLookup.get(r.paperId),date=String(p?.trainingDate||r.date||p?.date||'').slice(0,10)||'日期不明';
+  dates.add(date);if(!byDay.has(date))byDay.set(date,[]);byDay.get(date).push(r);
+ });
  var days=Array.from(dates).filter(Boolean).sort().reverse();
  if(!state.students.length){box.innerHTML=empty('尚未設定學生','請到「設定與備份」建立固定座號名單。');return;}
  box.innerHTML='<p class="hint">按日期展開當日座號；綠色＝該日已有登記，灰色＝尚未登記。以「訓練日期」歸檔；未設定訓練日期的舊紀錄沿用原日期。</p>'+days.map(function(date,di){
-  var rec=state.results.filter(function(r){return trainingDayForRecord(r)===date;});
+  var rec=byDay.get(date)||[];
   var done=new Set(rec.map(function(r){return r.student;})),total=students.length,doneCount=students.filter(function(id){return done.has(id);}).length;
-  var scored=rec.reduce(function(a,r){var p=paperOf(r.paperId),n=(p?.questionIds||[]).length;a.correct+=Math.max(0,n-(r.wrong||[]).length-(r.blank||[]).length);a.total+=n;return a;},{correct:0,total:0});
+  var scored=rec.reduce(function(a,r){var p=paperLookup.get(r.paperId),n=(p?.questionIds||[]).length;a.correct+=Math.max(0,n-(r.wrong||[]).length-(r.blank||[]).length);a.total+=n;return a;},{correct:0,total:0});
   var avg=scored.total?' · 正確率 '+(100*scored.correct/scored.total).toFixed(1)+'%':'';
+  var seatCounts=new Map();rec.forEach(function(r){seatCounts.set(r.student,(seatCounts.get(r.student)||0)+1);});
   var lines=students.map(function(id){
-   var has=done.has(id),n=rec.filter(function(r){return r.student===id;}).length;
+   var has=done.has(id),n=seatCounts.get(id)||0;
    return '<button type="button" class="seat-chip '+(has?'done':'pending')+'" data-history-day="'+safe(date)+'" data-history-student="'+safe(id)+'" aria-label="'+safe(id)+' '+(has?'已登記':'未登記')+'">'+safe(studentLabel(id))+(n>1?' · '+n+'筆':'')+'</button>';
   }).join('');
   return '<details class="record-day"'+(di===0?' open':'')+'><summary><span><strong>'+safe(date)+'</strong> <span class="small muted">'+rec.length+'筆紀錄</span></span><span class="record-day-progress">'+doneCount+'/'+total+'人已登記</span></summary>'+
