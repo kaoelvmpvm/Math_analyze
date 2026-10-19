@@ -127,17 +127,28 @@ function planCompactPages(assets,answerH,scale,pageLimit){
   positions.push({page:page,y:y,w:w,h:h});
   y+=h+space;
  }
- // One-page exams can place the key on their first page if enough room,
- // otherwise page 2 is reserved exclusively for the key.
- const keyPage=page===1&&y+answerH+2>bottom?2:page;
- if(keyPage>pageLimit)return null;
- if(keyPage===page&&y+answerH+2>bottom)return null;
- return {positions:positions,pages:keyPage,answerPage:keyPage,answerY:bottom-answerH};
+ // Do not create an answer-only sheet: move the final question onto a
+ // new page with the key when it does not fit beneath all questions.
+ if(y+answerH+2>bottom&&page<pageLimit){
+  const last=positions.pop();
+  if(!last)return null;
+  page++;
+  last.page=page;last.y=top;
+  y=top+last.h+space;
+  positions.push(last);
+ }
+ if(y+answerH+2>bottom)return null;
+ return {positions:positions,pages:page,answerPage:page,answerY:bottom-answerH};
 }
 function bestCompactLayout(assets,answerH){
- for(const scale of [1,.98,.96,.94,.92,.90,.88,.86,.84,.82,.80,.78,.76,.74,.72]){
-  const plan=planCompactPages(assets,answerH,scale,2);
-  if(plan)return {plan:plan,scale:scale,compact:true};
+ const scales=[1,.98,.96,.94,.92,.90,.88,.86,.84,.82,.80,.78,.76,.74,.72];
+ // Prefer 2-page layouts, then increase only if the question images require it.
+ for(let maxPages=2;maxPages<=Math.max(2,assets.length+1);maxPages++){
+  for(const scale of scales){
+   const plan=planCompactPages(assets,answerH,scale,maxPages);
+   if(plan&&plan.positions.at(-1)?.page===plan.answerPage)
+    return {plan:plan,scale:scale,compact:plan.pages<=2};
+  }
  }
  return null;
 }
@@ -193,6 +204,7 @@ async function combinedPdf(papers,exportLabel){
    }
    const key=answerStrip(p);
    const compact=bestCompactLayout(assets,key.height);
+   if(compact&&compact.plan.pages>2)overflow++;
    if(started)pdf.addPage();started=true;
    let page=1,y=top;
    const drawHead=()=>pdf.addImage(headerPng(p,page>1),'PNG',margin,12,182,26);
