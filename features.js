@@ -114,14 +114,28 @@ function appendAnswerPage(pdf,p){
  pdf.addImage(answerPagePng(p),'PNG',0,0,210,286,undefined,'FAST');
 }
 async function asJpeg(blob){
- const bitmap=await createImageBitmap(blob);
- const canvas=document.createElement('canvas');let width=bitmap.width;
- const factor=Math.min(1,1600/width);
- canvas.width=Math.max(1,Math.round(width*factor));canvas.height=Math.max(1,Math.round(bitmap.height*factor));
- const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);
- const data=canvas.toDataURL('image/jpeg',0.91);
- bitmap.close();canvas.width=1;canvas.height=1;
- return {data:data,width:Math.round(width*factor),height:Math.round(bitmap.height*factor)};
+ let bitmap=null;
+ try{
+  bitmap=await createImageBitmap(blob);
+  const sourceW=bitmap.width,sourceH=bitmap.height;
+  if(!Number.isFinite(sourceW)||!Number.isFinite(sourceH)||sourceW<=0||sourceH<=0)
+   throw Error('原始題圖像素尺寸無效（'+sourceW+'×'+sourceH+'）');
+  const factor=Math.min(1,1600/sourceW);
+  const canvas=document.createElement('canvas');
+  canvas.width=Math.max(1,Math.round(sourceW*factor));
+  canvas.height=Math.max(1,Math.round(sourceH*factor));
+  // Use the actual canvas dimensions, NOT the rounded pre-clamp values: very
+  // wide/short images used to report height=0 despite being rendered as 1px.
+  const width=canvas.width,height=canvas.height;
+  const ctx=canvas.getContext('2d');
+  if(!ctx)throw Error('瀏覽器無法建立題圖轉換畫布');
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,width,height);
+  ctx.drawImage(bitmap,0,0,width,height);
+  const data=canvas.toDataURL('image/jpeg',0.91);
+  if(!data.startsWith('data:image/jpeg'))throw Error('瀏覽器無法輸出題圖 JPEG');
+  canvas.width=1;canvas.height=1;
+  return {data:data,width:width,height:height,sourceWidth:sourceW,sourceHeight:sourceH};
+ }finally{if(bitmap&&typeof bitmap.close==='function')bitmap.close();}
 }
 async function getJpeg(id){
  if(imageCache.has(id))return imageCache.get(id);
@@ -145,14 +159,20 @@ async function combinedPdf(papers,exportLabel){
    const drawHead=()=>{pdf.addImage(headerPng(p,part>1),'PNG',margin,12,182,26);y=44;};
    drawHead();
    for(let i=0;i<p.questionIds.length;i++){
-    const id=p.questionIds[i],asset=await getJpeg(id);
-    if(!asset.width||!asset.height)throw Error('圖片 '+id+' 尺寸異常');
-    let h=asset.height/asset.width*imageW;
-    if(h>bottom-top-10)h=bottom-top-10;
+    const id=p.questionIds[i];
+    let asset;
+    try{asset=await getJpeg(id);}
+    catch(err){throw Error('圖片 '+id+' 轉換失敗：'+err.message+'。請到題庫管理檢查原題圖；若圖像缺損，需重新匯入正確的 v5 題圖包。');}
+    if(!Number.isFinite(asset.width)||!Number.isFinite(asset.height)||asset.width<=0||asset.height<=0)
+      throw Error('圖片 '+id+' 無效尺寸：'+asset.width+'×'+asset.height+'，請檢查來源題圖。');
+    let renderW=imageW,h=asset.height/asset.width*renderW;
+    const availableH=bottom-top-10;
+    if(h>availableH){renderW*=availableH/h;h=availableH;}
+    if(!Number.isFinite(h)||h<=0)throw Error('圖片 '+id+' 排版高度無效，請檢查來源題圖。');
     if(y+h+9>bottom){pdf.addPage();part++;drawHead();}
     pdf.setFont('helvetica','normal');pdf.setFontSize(10);pdf.setTextColor(35,48,67);
     pdf.text(String(i+1)+'.',16,y+6);
-    pdf.addImage(asset.data,'JPEG',imageX,y,imageW,h,'q_'+id,'FAST');
+    pdf.addImage(asset.data,'JPEG',imageX+(imageW-renderW)/2,y,renderW,h,'q_'+id,'FAST');
     y+=h+8;total++;
     if(total%7===0){setBusy(true,'正在合併 '+(k+1)+'／'+papers.length+' 位，已加入 '+total+' 題……');await new Promise(r=>setTimeout(r,0));}
    }
