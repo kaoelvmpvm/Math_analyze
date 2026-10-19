@@ -233,7 +233,7 @@ async function combinedPdf(papers,exportLabel){
     await new Promise(r=>setTimeout(r,0));
    }
   }
-  const suffix=exportLabel?String(exportLabel).replace(/[^\\w\\u4e00-\\u9fff-]/g,'_').slice(0,45)+'_':'';
+  const suffix=exportLabel?String(exportLabel).replace(/[^\w\u4e00-\u9fff-]/g,'_').slice(0,45)+'_':'';
   const file='MathAnalyze_個別卷合併_'+papers.length+'人_'+suffix+new Date().toISOString().slice(0,10)+'.pdf';
   setBusy(true,'PDF 已排版完成，正在準備下載……');pdf.save(file);
   toast('已產生合併PDF：'+papers.length+'位學生、'+total+'題。答案放在各卷末頁'+(overflow?'；'+overflow+'份題圖過長無法安全壓入兩頁，請檢查輸出頁數':'')+'。');
