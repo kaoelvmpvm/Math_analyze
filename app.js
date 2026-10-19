@@ -181,8 +181,11 @@ function loadExistingRecord(){var paper=val('recordPaper'),student=val('recordSt
 function saveRecord(){
  var p=paperOf(val('recordPaper')),student=val('recordStudent'),time=Number(val('recordMinutes'));if(!p||!student)return notify('先選擇考卷與學生。',true);
  if(!(time>0&&time<=180))return notify('請輸入實際作答分鐘數（1～180）。',true);
+ if(p.isSelfPractice&&p.student!==student)return notify('自主練習已綁定原學生座號，不能登記為其他學生。',true);
  if(p.mode==='individual'&&p.student!==student&&!window.confirm('這份題卷原本為'+p.student+'設計，仍要記錄其他學生嗎？'))return;
+ var previous=state.results.find(function(x){return x.paperId===p.id&&x.student===student;});
  var r={paperId:p.id,student:student,minutes:time,wrong:currentRecord.wrong.slice(),blank:currentRecord.blank.slice(),reasons:Object.assign({},currentRecord.reasons),date:new Date().toISOString()};
+ if(previous?.choices)r.choices=Object.assign({},previous.choices);if(previous?.source)r.source=previous.source;if(previous?.source==='self-practice')r.teacherReviewed=true;
  state.results=state.results.filter(function(x){return !(x.paperId===r.paperId&&x.student===r.student);});state.results.push(r);save();notify('已儲存 '+student+' 的結果；下一回出卷會自動參考。');refreshAll();
 }
 function trainingDayForRecord(r){var p=paperOf(r.paperId);return String(p?.trainingDate||r.date||p?.date||'').slice(0,10)||'日期不明';}
