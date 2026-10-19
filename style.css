@@ -17,3 +17,41 @@
 @media(max-width:920px){.bulk-students{grid-template-columns:repeat(5,minmax(0,1fr))}}
 @media(max-width:620px){.bulk-students{grid-template-columns:repeat(3,minmax(0,1fr))}.batch-history-item{flex-direction:column;align-items:stretch}.batch-history-item .actions{align-self:flex-start}#studentWrongDetail .grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media print{.wrong-dialog,#batchPanel,#studentWrongDetail{display:none!important}}
+
+
+/* v10 local daily practice / compact dated register */
+.record-day{border:1px solid var(--line);border-radius:13px;background:var(--card);overflow:hidden;margin-bottom:11px}
+.record-day>summary{list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px;cursor:pointer;user-select:none}
+.record-day>summary::-webkit-details-marker{display:none}
+.record-day>summary:hover{background:var(--blue2)}
+.record-day>summary:before{content:'▸';font-size:14px;color:var(--sub);margin-right:-6px}
+.record-day[open]>summary:before{content:'▾'}
+.record-day-progress{color:var(--green);font-size:13px;font-weight:700;white-space:nowrap}
+.record-day-body{border-top:1px solid var(--line);padding:13px}
+.seat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:8px}
+.seat-chip{min-height:38px;padding:8px 5px;border:1px solid var(--line);border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;font-size:13px;transition:background .12s ease,box-shadow .12s ease}
+.seat-chip.pending{color:#697584;background:#edf0f3;border-color:#dde1e7}
+.seat-chip.done{color:#066b51;background:#dbf7ec;border-color:#93d9c1}
+.seat-chip.chosen{outline:2px solid var(--blue);outline-offset:1px}
+.seat-chip:hover{filter:brightness(.96)}
+.record-day-detail{background:var(--bg);border-radius:10px;margin-top:14px;padding:12px}
+.record-day-detail>h4{font-size:15px;margin:0 0 12px}
+.record-detail-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}
+.record-detail-card .actions{gap:8px}
+.record-detail-card .hint{margin:8px 0}
+.record-errors{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0}
+.record-error-entry{font-size:12px;background:#fff3e1;color:#81520a;padding:5px 8px;border-radius:6px}
+.record-detail-empty{color:var(--sub);padding:8px 0}
+.practice-question{border:1px solid var(--line);background:var(--card);border-radius:13px;padding:15px;margin:14px 0}
+.practice-question h4{margin:0 0 12px}
+.practice-image{width:100%;overflow:auto}
+.practice-image img{display:block;width:100%;max-width:850px;height:auto;object-fit:contain}
+.practice-options{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:13px}
+.practice-option{display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;padding:11px 5px;border-radius:10px;border:1px solid var(--line);background:var(--bg);font-weight:700}
+.practice-option:has(input:checked){background:var(--blue2);border-color:var(--blue);color:#1a4db1}
+.practice-option input{accent-color:var(--blue);margin:0}
+#practiceTodayStatus .kpi{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--bg)}
+#practiceTodayStatus .num{font-size:22px;font-weight:800;margin-top:7px}
+#practiceTodayStatus .k{font-size:12px;color:var(--sub)}
+#practiceFeedback{margin-top:14px}
+@media(max-width:600px){.record-day>summary{padding:12px 9px}.seat-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.practice-options{grid-template-columns:repeat(2,minmax(0,1fr))}.record-day-progress{font-size:12px}}
