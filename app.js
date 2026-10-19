@@ -2,7 +2,7 @@
 'use strict';
 var KEY='math-analyze-teacher-v1', BANKKEY='math-analyze-catalog-v1', DBNAME='math-analyze-question-images-v1', ASSET_VERSION='v5-teacher-classified';
 var TOPICS=[['R1','根式的表示','2-2'],['R23','根式的乘除','2-2'],['R4','根式的加減','2-2'],['R5','根式的四則運算','2-2'],['P1','畢氏定理','2-3'],['P2','平面上的距離','2-3'],['F1','因式與倍式','3-1'],['F23','因式分解','3-1'],['X','十字交乘法','3-2']];
-var state={students:[],papers:[],results:[],overrides:{},packVersion:''}, catalog=null, byId={}, dbPromise=null, imageUrls={}, selectedPaperId='', bankPage=0, currentRecord={wrong:[],blank:[],reasons:{}}, previewToken=0;
+var state={students:[],papers:[],results:[],overrides:{},packVersion:'',roster:{prefix:'',size:0},practiceDrafts:{}}, catalog=null, byId={}, dbPromise=null, imageUrls={}, selectedPaperId='', bankPage=0, currentRecord={wrong:[],blank:[],reasons:{}}, previewToken=0;
 function $(id){return document.getElementById(id);}
 function safe(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function val(id){return $(id)?$(id).value:'';}
@@ -15,7 +15,7 @@ function trainingStamp(d){return Date.parse((validTrainingDate(d)?d:localISODate
 function uid(){return Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7);}
 function notify(msg,err){document.querySelectorAll('.toast').forEach(function(e){e.remove();});var x=document.createElement('div');x.className='toast'+(err?' error':'');x.textContent=msg;document.body.appendChild(x);setTimeout(function(){x.remove();},4100);}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){notify('瀏覽器儲存空間不足，請先下載紀錄備份。',true);}}
-function load(){try{var t=JSON.parse(localStorage.getItem(KEY)||'null');if(t&&Array.isArray(t.students)&&Array.isArray(t.papers)&&Array.isArray(t.results))state=Object.assign(state,t);var b=JSON.parse(localStorage.getItem(BANKKEY)||'null');if(b&&Array.isArray(b.questions)&&b.questions.length)applyCatalog(b,false);}catch(e){console.warn('Unable to restore local storage',e);}}
+function load(){try{var t=JSON.parse(localStorage.getItem(KEY)||'null');if(t&&Array.isArray(t.students)&&Array.isArray(t.papers)&&Array.isArray(t.results))state=Object.assign(state,t);if(!state.roster)state.roster={prefix:'',size:0};if(!state.practiceDrafts||typeof state.practiceDrafts!=='object')state.practiceDrafts={};var b=JSON.parse(localStorage.getItem(BANKKEY)||'null');if(b&&Array.isArray(b.questions)&&b.questions.length)applyCatalog(b,false);}catch(e){console.warn('Unable to restore local storage',e);}}
 function applyCatalog(data,persist){
  if(!data||!Array.isArray(data.questions)||!data.questions.length)throw Error('題庫缺少 questions 清單');
  var codes=new Set(TOPICS.map(function(t){return t[0];})),seen=new Set();
@@ -83,12 +83,34 @@ async function showQuestion(id){var q=byId[id];if(!q)return;var box=$('bankDetai
  '<div class="actions"><button class="btn primary" data-set-q="'+safe(id)+'" data-q-ok="yes">教師核准可用</button><button class="btn danger" data-set-q="'+safe(id)+'" data-q-ok="no">停用此題</button><button class="btn" data-set-q="'+safe(id)+'" data-q-ok="reset">恢復來源狀態</button></div>';
  $('closeDetail').onclick=function(){box.style.display='none';};box.scrollIntoView({behavior:'smooth',block:'start'});
 }
+function studentCompare(a,b){return String(a).localeCompare(String(b),'zh-Hant',{numeric:true,sensitivity:'base'});}
+function rosterStudents(){
+ var sorted=state.students.slice().sort(studentCompare),r=state.roster||{},ids=[];
+ if(r.prefix&&r.size>0){for(var i=1;i<=r.size;i++)ids.push(r.prefix+'-'+String(i).padStart(2,'0'));}
+ sorted.forEach(function(id){if(!ids.includes(id))ids.push(id);});
+ return ids;
+}
+function studentLabel(id){var r=state.roster||{};if(r.prefix&&id.indexOf(r.prefix+'-')===0){var n=id.slice(r.prefix.length+1);if(/^\d+$/.test(n))return Number(n)+'號';}return id;}
+function rosterStatus(){
+ var r=state.roster||{};if($('rosterPrefix')&&!$('rosterPrefix').value)$('rosterPrefix').value=r.prefix||((state.students[0]||'').match(/^(.*)-\d+$/)||[])[1]||'815';
+ if($('rosterSize'))$('rosterSize').value=r.size||35;
+ if($('rosterInfo'))$('rosterInfo').textContent=r.size?'固定座號：'+r.prefix+' 01～'+String(r.size).padStart(2,'0')+'；已保留所有原學生與歷史紀錄。':'尚未設定固定人數。已建立的學生仍會出現在日期清單中。';
+}
+function setupRoster(){
+ var prefix=val('rosterPrefix').trim(),size=Number(val('rosterSize'));
+ if(!prefix||prefix.length>20||!Number.isInteger(size)||size<1||size>60||/[^\w\u4e00-\u9fff-]/.test(prefix))return notify('班級代碼請使用中英文、數字或連字號；人數限1～60人。',true);
+ var old=state.roster||{},willAdd=[];
+ for(var i=1;i<=size;i++){var id=prefix+'-'+String(i).padStart(2,'0');if(!state.students.includes(id))willAdd.push(id);}
+ // Preserve existing entries and histories even when reducing the displayed roster size.
+ state.roster={prefix:prefix,size:size};state.students.push.apply(state.students,willAdd);state.students.sort(studentCompare);
+ save();refreshAll();notify('已設定 '+prefix+' 班固定 '+size+' 個座號，並保留舊紀錄。');
+}
 function studentOptions(target,emptyFirst){
- var old=val(target);var opts=(emptyFirst?'<option value="class">全班彙整</option>':'<option value="">請選擇學生</option>')+state.students.map(function(s){return '<option value="'+safe(s)+'">'+safe(s)+'</option>';}).join('');$(target).innerHTML=opts;if(old&&Array.from($(target).options).some(function(o){return o.value===old;}))$(target).value=old;
+ var old=val(target);var opts=(emptyFirst?'<option value="class">全班彙整</option>':'<option value="">請選擇學生</option>')+rosterStudents().map(function(s){return '<option value="'+safe(s)+'">'+safe(s)+'</option>';}).join('');$(target).innerHTML=opts;if(old&&Array.from($(target).options).some(function(o){return o.value===old;}))$(target).value=old;
 }
 function refreshStudents(){
- $('studentsList').innerHTML=state.students.length?state.students.map(function(s){return '<span class="pill">'+safe(s)+' <button title="移除" data-remove-student="'+safe(s)+'">×</button></span>';}).join(''):'<span class="hint">尚未新增學生</span>';
- ['paperStudent','recordStudent'].forEach(function(id){studentOptions(id,false);});studentOptions('reportScope',true);
+ $('studentsList').innerHTML=state.students.length?rosterStudents().map(function(s){return '<span class="pill">'+safe(s)+' <button title="移除" data-remove-student="'+safe(s)+'">×</button></span>';}).join(''):'<span class="hint">尚未新增學生</span>';
+ ['paperStudent','recordStudent'].forEach(function(id){studentOptions(id,false);});studentOptions('reportScope',true);rosterStatus();
 }
 function historySeen(id,scope){var x=summarize(scope).seen[id];return x;}
 function selectQuestions(count,topicCodes,scope,trainingDate){
@@ -163,9 +185,36 @@ function saveRecord(){
  var r={paperId:p.id,student:student,minutes:time,wrong:currentRecord.wrong.slice(),blank:currentRecord.blank.slice(),reasons:Object.assign({},currentRecord.reasons),date:new Date().toISOString()};
  state.results=state.results.filter(function(x){return !(x.paperId===r.paperId&&x.student===r.student);});state.results.push(r);save();notify('已儲存 '+student+' 的結果；下一回出卷會自動參考。');refreshAll();
 }
+function trainingDayForRecord(r){var p=paperOf(r.paperId);return String(p?.trainingDate||r.date||p?.date||'').slice(0,10)||'日期不明';}
+function recordDetailHtml(rows,student){
+ if(!rows.length)return '<div class="record-detail-empty">本日尚未登記。</div>';
+ return rows.map(function(r){
+  var p=paperOf(r.paperId),ids=p?.questionIds||[],wrong=new Set(r.wrong||[]),blank=new Set(r.blank||[]),good=Math.max(0,ids.length-wrong.size-blank.size);
+  var reasonLabels={K:'知識不熟',P:'推理／方法錯',C:'已確認失誤',T:'時間不足',U:'未判定'};
+  var summary=ids.map(function(id,i){var status=wrong.has(id)?'答錯':blank.has(id)?'空白':'';return status?'<span class="record-error-entry">第'+(i+1)+'題 '+status+(wrong.has(id)?'（'+safe(reasonLabels[(r.reasons||{})[id]]||reasonLabels.U)+'）':'')+'</span>':'';}).filter(Boolean).join('');
+  return '<div class="record-detail-card"><div class="actions" style="justify-content:space-between"><strong>'+safe(p?.title||'舊版試卷')+'</strong><span class="chip">'+good+'/'+ids.length+'題正確</span></div>'+
+   '<p class="hint">訓練日期：'+safe(trainingDayForRecord(r))+'｜'+safe(r.minutes)+'分鐘｜答錯'+wrong.size+'題｜空白'+blank.size+'題</p>'+
+   '<div class="record-errors">'+(summary||'<span class="muted">本回全部答對</span>')+'</div>'+
+   '<button class="btn" data-edit-record-paper="'+safe(r.paperId)+'" data-edit-record-student="'+safe(student)+'">查看／修改這筆登記</button></div>';
+ }).join('');
+}
 function refreshRecordHistory(){
- var rec=state.results.slice().reverse();
- $('recordHistory').innerHTML=rec.length?rec.slice(0,30).map(function(r){var p=paperOf(r.paperId),count=p?p.questionIds.length:0,correct=count-(r.wrong||[]).length-(r.blank||[]).length;return '<div class="item"><div><h4>'+safe(r.student)+' · '+safe(p?.title||'舊測驗')+'</h4><p>'+safe(p?.trainingDate||String(r.date||'').slice(0,10))+' · '+r.minutes+'分鐘 · '+count+'題</p></div><span class="chip '+(count&&correct/count>=.8?'ok':'wait')+'">'+correct+'/'+count+'</span></div>';}).join(''):empty('尚無作答紀錄','選好考卷與學生後，只需標記錯題與空白題。');
+ var box=$('recordHistory');if(!box)return;
+ var students=rosterStudents(),dates=new Set([localISODate()]);
+ state.papers.forEach(function(p){if(p.trainingDate||p.date)dates.add(String(p.trainingDate||p.date).slice(0,10));});
+ state.results.forEach(function(r){dates.add(trainingDayForRecord(r));});
+ var days=Array.from(dates).filter(Boolean).sort().reverse();
+ if(!state.students.length){box.innerHTML=empty('尚未設定學生','請到「設定與備份」建立固定座號名單。');return;}
+ box.innerHTML='<p class="hint">按日期展開當日座號；綠色＝該日已有登記，灰色＝尚未登記。以「訓練日期」歸檔；未設定訓練日期的舊紀錄沿用原日期。</p>'+days.map(function(date,di){
+  var rec=state.results.filter(function(r){return trainingDayForRecord(r)===date;});
+  var done=new Set(rec.map(function(r){return r.student;})),total=students.length,doneCount=students.filter(function(id){return done.has(id);}).length;
+  var lines=students.map(function(id){
+   var has=done.has(id),n=rec.filter(function(r){return r.student===id;}).length;
+   return '<button type="button" class="seat-chip '+(has?'done':'pending')+'" data-history-day="'+safe(date)+'" data-history-student="'+safe(id)+'" aria-label="'+safe(id)+' '+(has?'已登記':'未登記')+'">'+safe(studentLabel(id))+(n>1?' · '+n+'筆':'')+'</button>';
+  }).join('');
+  return '<details class="record-day"'+(di===0?' open':'')+'><summary><span><strong>'+safe(date)+'</strong> <span class="small muted">'+rec.length+'筆紀錄</span></span><span class="record-day-progress">'+doneCount+'/'+total+'人已登記</span></summary>'+
+   '<div class="record-day-body"><div class="seat-grid">'+lines+'</div><div class="record-day-detail" data-detail-day="'+safe(date)+'"><p class="hint">選取綠色座號，可查看當日作答與錯誤原因。</p></div></div></details>';
+ }).join('');
 }
 function pct(n){return (100*n).toFixed(1)+'%';}
 function report(){
@@ -203,7 +252,7 @@ function exportBackup(){var data={format:'math-analyze-records-v1',exported_at:n
 function importBackupFile(file){
  file.text().then(function(text){var obj=JSON.parse(text);if(obj.format!=='math-analyze-records-v1'||!obj.state||!Array.isArray(obj.state.papers)||!Array.isArray(obj.state.results)||!Array.isArray(obj.state.students))throw Error('不是支援的教師備份格式');
  if(!window.confirm('匯入將取代這個瀏覽器目前的學生、考卷與作答紀錄。確認繼續？'))return;
- state={students:obj.state.students,papers:obj.state.papers,results:obj.state.results,overrides:obj.state.overrides||{},packVersion:state.packVersion};
+ state={students:obj.state.students,papers:obj.state.papers,results:obj.state.results,overrides:obj.state.overrides||{},packVersion:state.packVersion,roster:obj.state.roster||{prefix:'',size:0},practiceDrafts:obj.state.practiceDrafts||{}};
  save();selectedPaperId=state.papers.at(-1)?.id||'';refreshAll();notify('已還原紀錄。請確認題圖包也已在本機匯入。');
  }).catch(function(e){notify('備份匯入失敗：'+e.message,true);});
 }
@@ -218,12 +267,16 @@ function switchTab(name){
  document.querySelectorAll('.nav-btn').forEach(function(x){x.classList.toggle('active',x.dataset.target===name);});
  window.scrollTo({top:0,behavior:'smooth'});
 }
-function addStudent(name){var v=String(name||'').trim();if(!v)return notify('請輸入座號或學生代號。',true);if(state.students.includes(v))return notify('這個學生代號已存在。',true);state.students.push(v);state.students.sort();save();refreshAll();$('studentInput').value='';notify('已新增 '+v);}
+function addStudent(name){var v=String(name||'').trim();if(!v)return notify('請輸入座號或學生代號。',true);if(state.students.includes(v))return notify('這個學生代號已存在。',true);state.students.push(v);state.students.sort(studentCompare);save();refreshAll();$('studentInput').value='';notify('已新增 '+v);}
 function events(){
  document.addEventListener('click',function(e){var nav=e.target.closest('[data-target]');if(nav){switchTab(nav.dataset.target);return;}
  var open=e.target.closest('[data-open-q]');if(open){showQuestion(open.dataset.openQ);return;}
  var set=e.target.closest('[data-set-q]');if(set){var id=set.dataset.setQ;var v=set.dataset.qOk;state.overrides[id]=v==='reset'?undefined:v==='yes';if(v==='reset')delete state.overrides[id];save();refreshBank();showQuestion(id);notify('已更新題目 '+id+' 的狀態');return;}
  var sel=e.target.closest('[data-paper-id]');if(sel){selectedPaperId=sel.dataset.paperId;paperList();renderPreview();return;}
+ var dated=e.target.closest('[data-history-day][data-history-student]');
+ if(dated){var date=dated.dataset.historyDay,student=dated.dataset.historyStudent,group=dated.closest('.record-day'),target=group?.querySelector('.record-day-detail');if(target){group.querySelectorAll('.seat-chip').forEach(function(b){b.classList.toggle('chosen',b===dated);});var rows=state.results.filter(function(r){return r.student===student&&trainingDayForRecord(r)===date;});target.innerHTML='<h4>'+safe(date)+' · '+safe(student)+'（'+rows.length+'筆）</h4>'+recordDetailHtml(rows,student);}return;}
+ var edit=e.target.closest('[data-edit-record-paper]');
+ if(edit){$('recordPaper').value=edit.dataset.editRecordPaper;$('recordStudent').value=edit.dataset.editRecordStudent;loadExistingRecord();$('recordPaper').closest('.card')?.scrollIntoView({behavior:'smooth',block:'start'});return;}
  var rem=e.target.closest('[data-remove-student]');if(rem){var name=rem.dataset.removeStudent;if(state.results.some(function(r){return r.student===name;}))return notify('該學生已有測驗紀錄，請先保留代號避免歷史紀錄失聯。',true);if(window.confirm('移除學生代號 '+name+'？')){state.students=state.students.filter(function(x){return x!==name;});save();refreshAll();}return;}
  var rq=e.target.closest('[data-rq]');if(rq){var id=rq.dataset.rq,k=rq.dataset.rtype;var list=currentRecord[k];if(list.includes(id))currentRecord[k]=list.filter(function(x){return x!==id;});else{currentRecord[k].push(id);currentRecord[k==='wrong'?'blank':'wrong']=currentRecord[k==='wrong'?'blank':'wrong'].filter(function(x){return x!==id;});}refreshRecordGrid();return;}
  });
@@ -238,10 +291,10 @@ function events(){
  $('recordPaper').onchange=loadExistingRecord;$('recordStudent').onchange=loadExistingRecord;$('saveRecord').onclick=saveRecord;
  $('reportScope').onchange=function(){report();if(window.MathAnalyzeExtensions?.refresh)window.MathAnalyzeExtensions.refresh();};$('exportReport').onclick=exportReport;
  $('importPack').onclick=function(){$('importInput').click();};$('importInput').onchange=async function(){var file=this.files[0];if(!file)return;$('importPack').disabled=true;try{await importZip(file);}catch(e){notify('題庫匯入失敗：'+e.message,true);$('importProgress').textContent=e.message;}finally{$('importPack').disabled=false;this.value='';}};
- $('addStudent').onclick=function(){addStudent(val('studentInput'));};$('studentInput').addEventListener('keydown',function(e){if(e.key==='Enter')addStudent(val('studentInput'));});
- $('addClassBatch').onclick=function(){var prefix=window.prompt('輸入班級代碼（建立 01～35 號，僅作匿名識別）','815');if(prefix===null)return;prefix=prefix.trim().slice(0,20);if(!prefix)return;for(var i=1;i<=35;i++){var v=prefix+'-'+String(i).padStart(2,'0');if(!state.students.includes(v))state.students.push(v);}state.students.sort();save();refreshAll();notify('學生代號已更新');};
+ $('addStudent').onclick=function(){addStudent(val('studentInput'));};if($('applyRoster'))$('applyRoster').onclick=setupRoster;$('studentInput').addEventListener('keydown',function(e){if(e.key==='Enter')addStudent(val('studentInput'));});
+ $('addClassBatch').onclick=function(){var prefix=window.prompt('輸入班級代碼（建立 01～35 號，僅作匿名識別）','815');if(prefix===null)return;prefix=prefix.trim().slice(0,20);if(!prefix)return;for(var i=1;i<=35;i++){var v=prefix+'-'+String(i).padStart(2,'0');if(!state.students.includes(v))state.students.push(v);}state.students.sort(studentCompare);save();refreshAll();notify('學生代號已更新');};
  $('exportBackup').onclick=exportBackup;$('importBackup').onclick=function(){$('backupInput').click();};$('backupInput').onchange=function(){if(this.files[0])importBackupFile(this.files[0]);this.value='';};
- $('resetData').onclick=function(){if(window.confirm('確定清空本機所有學生、考卷與作答紀錄？此動作不可復原，請先下載備份。')&&window.confirm('再次確認：清除所有學生、考卷、錯題紀錄與教師覆核狀態？')){state={students:[],papers:[],results:[],overrides:{},packVersion:state.packVersion};selectedPaperId='';save();refreshAll();notify('已清除本機登記紀錄。');}};
+ $('resetData').onclick=function(){if(window.confirm('確定清空本機所有學生、考卷與作答紀錄？此動作不可復原，請先下載備份。')&&window.confirm('再次確認：清除所有學生、考卷、錯題紀錄與教師覆核狀態？')){state={students:[],papers:[],results:[],overrides:{},packVersion:state.packVersion,roster:{prefix:'',size:0},practiceDrafts:{}};selectedPaperId='';save();refreshAll();notify('已清除本機登記紀錄。');}};
 }
 
 function createStudentBatch(request){
