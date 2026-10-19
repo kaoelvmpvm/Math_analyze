@@ -80,40 +80,66 @@ function headerPng(p,continued){
 }
 // 每張個別卷專屬的答案頁；中文排版轉成圖片，避免 jsPDF 預設字型缺字。
 // 只使用該卷 questionIds 的實際排序；不對來源答案進行擅自推論。
-function answerPagePng(p){
- const c=document.createElement('canvas');
- c.width=1540;c.height=2100;
- const ctx=c.getContext('2d');
- ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);
+// Compact answer strip: fitted at the foot of the student's final question page.
+function answerStrip(p){
+ const colCount=5,rows=Math.ceil((p.questionIds||[]).length/colCount);
+ const canvas=document.createElement('canvas');
+ canvas.width=1500;canvas.height=124+rows*56;
+ const ctx=canvas.getContext('2d');
+ if(!ctx)throw Error('無法建立答案表畫布');
+ ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);
+ ctx.strokeStyle='#a9b6c5';ctx.lineWidth=2;
+ ctx.beginPath();ctx.moveTo(52,15);ctx.lineTo(1450,15);ctx.stroke();
  const font='"Microsoft JhengHei","Noto Sans TC",sans-serif';
- ctx.fillStyle='#172c44';
- ctx.font='bold 62px '+font;
- ctx.fillText('本卷答案表',86,144);
- ctx.font='34px '+font;
- const exam=String(p.title||'數學個別卷');
- ctx.fillText(exam.slice(0,36),86,224,1370);
- ctx.font='28px '+font;ctx.fillStyle='#475569';
- ctx.fillText('學生：'+String(p.student||'全班')+'　訓練日期：'+String(p.trainingDate||String(p.date||'').slice(0,10))+'　共 '+p.questionIds.length+' 題',86,295,1370);
- ctx.strokeStyle='#cbd5e1';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(86,336);ctx.lineTo(1450,336);ctx.stroke();
- ctx.font='25px '+font;ctx.fillText('依本卷題號排列；答案取自原始題庫，尚須教師覆核。',86,390,1370);
- const columns=5,rows=Math.ceil(p.questionIds.length/columns),columnWidth=265,rowHeight=110;
- const left=86,top=490;
+ ctx.fillStyle='#18283e';ctx.font='bold 43px '+font;
+ ctx.fillText('本卷答案',56,64,330);
+ ctx.font='27px '+font;ctx.fillStyle='#4b5e72';
+ ctx.fillText('學生：'+String(p.student||'全班')+'　日期：'+String(p.trainingDate||String(p.date||'').slice(0,10)),400,61,1020);
+ const left=54,top=88,colWidth=280;
  for(let i=0;i<p.questionIds.length;i++){
   const q=API.question(p.questionIds[i]);
   const answer=q?.answer_as_provided==null?'待覆核':String(q.answer_as_provided).trim()||'待覆核';
-  const col=Math.floor(i/rows),row=i%rows;
-  const x=left+col*columnWidth,y=top+row*rowHeight;
-  ctx.fillStyle='#f5f8fc';ctx.fillRect(x,y-43,columnWidth-18,83);
-  ctx.font='28px '+font;ctx.fillStyle='#64748b';ctx.fillText(''+(i+1)+'.',x+13,y+11,64);
-  ctx.font='bold 38px '+font;ctx.fillStyle='#152d47';ctx.fillText(answer,x+75,y+13,columnWidth-102);
+  const x=left+(i%colCount)*colWidth,y=top+Math.floor(i/colCount)*56;
+  ctx.fillStyle=i%2?'#f8fafc':'#f2f5fa';ctx.fillRect(x,y,colWidth-10,48);
+  ctx.font='26px '+font;ctx.fillStyle='#536477';ctx.fillText((i+1)+'.',x+11,y+34,56);
+  ctx.font='bold 30px '+font;ctx.fillStyle='#14243a';ctx.fillText(answer,x+68,y+34,colWidth-84);
  }
- ctx.fillStyle='#64748b';ctx.font='24px '+font;
- ctx.fillText('僅供核對：不同學生的試卷可能使用不同題目與順序。',86,1970,1350);
- return c.toDataURL('image/png');
+ ctx.fillStyle='#66788b';ctx.font='22px '+font;
+ ctx.fillText('依本卷題號排列；來源題庫答案尚待教師覆核。',56,canvas.height-13,1380);
+ return {data:canvas.toDataURL('image/png'),height:canvas.height/canvas.width*182};
 }
-function appendAnswerPage(pdf,p){
- pdf.addPage();
- pdf.addImage(answerPagePng(p),'PNG',0,0,210,286,undefined,'FAST');
+// Preflight question positions so short tests stay on at most 2 pages,
+// retaining room for the answers at the bottom of the second (or first) page.
+function planCompactPages(assets,answerH,scale,pageLimit){
+ const top=44,bottom=278,imageW=169,space=8;
+ let page=1,y=top;const positions=[];
+ for(const asset of assets){
+  let w=imageW*scale,h=asset.height/asset.width*w;
+  const maxH=bottom-top-10;
+  if(h>maxH){w*=maxH/h;h=maxH;}
+  const threshold=page===pageLimit?bottom-answerH-3:bottom;
+  if(y+h+9>threshold){
+   page++;y=top;
+  }
+  if(page>pageLimit)return null;
+  const pageThreshold=page===pageLimit?bottom-answerH-3:bottom;
+  if(y+h+9>pageThreshold)return null;
+  positions.push({page:page,y:y,w:w,h:h});
+  y+=h+space;
+ }
+ // One-page exams can place the key on their first page if enough room,
+ // otherwise page 2 is reserved exclusively for the key.
+ const keyPage=page===1&&y+answerH+2>bottom?2:page;
+ if(keyPage>pageLimit)return null;
+ if(keyPage===page&&y+answerH+2>bottom)return null;
+ return {positions:positions,pages:keyPage,answerPage:keyPage,answerY:bottom-answerH};
+}
+function bestCompactLayout(assets,answerH){
+ for(const scale of [1,.98,.96,.94,.92,.90,.88,.86,.84,.82,.80,.78,.76,.74,.72]){
+  const plan=planCompactPages(assets,answerH,scale,2);
+  if(plan)return {plan:plan,scale:scale,compact:true};
+ }
+ return null;
 }
 async function asJpeg(blob){
  let bitmap=null;
@@ -149,46 +175,69 @@ async function combinedPdf(papers,exportLabel){
  if(!snapshot().ready)throw Error('請先匯入 v5 題圖包，才能合併下載。');
  const JSPDF=window.jspdf?.jsPDF;if(!JSPDF)throw Error('PDF 組件未載入，請檢查網路連線並重新整理。');
  const pdf=new JSPDF({orientation:'portrait',unit:'mm',format:'a4',compress:true});
- const W=210,H=297,margin=14,imageX=28,imageW=169,top=44,bottom=278;
- let total=0,started=false;
+ const imageX=28,imageW=169,top=44,bottom=278,margin=14;
+ let total=0,started=false,overflow=0;
  imageCache=new Map();
  try {
- for(let k=0;k<papers.length;k++){
+  for(let k=0;k<papers.length;k++){
    const p=papers[k];
-   if(started)pdf.addPage();
-   started=true;
-   let y=top,part=1;
-   const drawHead=()=>{pdf.addImage(headerPng(p,part>1),'PNG',margin,12,182,26);y=44;};
-   drawHead();
-   for(let i=0;i<p.questionIds.length;i++){
-    const id=p.questionIds[i];
+   // Validate every image BEFORE starting this student's PDF pages.
+   const assets=[];
+   for(const id of p.questionIds){
     let asset;
     try{asset=await getJpeg(id);}
-    catch(err){throw Error('圖片 '+id+' 轉換失敗：'+err.message+'。請到題庫管理檢查原題圖；若圖像缺損，需重新匯入正確的 v5 題圖包。');}
+    catch(err){throw Error('圖片 '+id+' 轉換失敗：'+err.message+'。請到題庫管理檢查原題圖。');}
     if(!Number.isFinite(asset.width)||!Number.isFinite(asset.height)||asset.width<=0||asset.height<=0)
       throw Error('圖片 '+id+' 無效尺寸：'+asset.width+'×'+asset.height+'，請檢查來源題圖。');
-    let renderW=imageW,h=asset.height/asset.width*renderW;
-    const availableH=bottom-top-10;
-    if(h>availableH){renderW*=availableH/h;h=availableH;}
-    if(!Number.isFinite(h)||h<=0)throw Error('圖片 '+id+' 排版高度無效，請檢查來源題圖。');
-    if(y+h+9>bottom){pdf.addPage();part++;drawHead();}
-    pdf.setFont('helvetica','normal');pdf.setFontSize(10);pdf.setTextColor(35,48,67);
-    pdf.text(String(i+1)+'.',16,y+6);
-    pdf.addImage(asset.data,'JPEG',imageX+(imageW-renderW)/2,y,renderW,h,'q_'+id,'FAST');
-    y+=h+8;total++;
-    if(total%7===0){setBusy(true,'正在合併 '+(k+1)+'／'+papers.length+' 位，已加入 '+total+' 題……');await new Promise(r=>setTimeout(r,0));}
+    assets.push(asset);
    }
-   // Keep each student's answers immediately after their own questions, never mix keys.
-   appendAnswerPage(pdf,p);
-   // Release decoded JPEG references between students to reduce browser memory use.
+   const key=answerStrip(p);
+   const compact=bestCompactLayout(assets,key.height);
+   if(started)pdf.addPage();started=true;
+   let page=1,y=top;
+   const drawHead=()=>pdf.addImage(headerPng(p,page>1),'PNG',margin,12,182,26);
+   drawHead();
+   if(compact){
+    for(let i=0;i<p.questionIds.length;i++){
+     const id=p.questionIds[i],asset=assets[i],where=compact.plan.positions[i];
+     while(page<where.page){pdf.addPage();page++;drawHead();}
+     pdf.setFont('helvetica','normal');pdf.setFontSize(10);pdf.setTextColor(35,48,67);
+     pdf.text(String(i+1)+'.',16,where.y+6);
+     pdf.addImage(asset.data,'JPEG',imageX+(imageW-where.w)/2,where.y,where.w,where.h,'q_'+id,'FAST');
+     total++;
+    }
+    while(page<compact.plan.answerPage){pdf.addPage();page++;drawHead();}
+    pdf.addImage(key.data,'PNG',margin,compact.plan.answerY,182,key.height,undefined,'FAST');
+   }else{
+    // Never distort an overlong mathematical question to enforce 2 pages.
+    // Keep the key with the questions when space allows, otherwise use a final page.
+    overflow++;
+    for(let i=0;i<p.questionIds.length;i++){
+     const id=p.questionIds[i],asset=assets[i];
+     let w=imageW,h=asset.height/asset.width*w;
+     const maxH=bottom-top-10;
+     if(h>maxH){w*=maxH/h;h=maxH;}
+     if(y+h+9>bottom){pdf.addPage();page++;drawHead();y=top;}
+     pdf.setFont('helvetica','normal');pdf.setFontSize(10);pdf.setTextColor(35,48,67);
+     pdf.text(String(i+1)+'.',16,y+6);
+     pdf.addImage(asset.data,'JPEG',imageX+(imageW-w)/2,y,w,h,'q_'+id,'FAST');
+     y+=h+8;total++;
+    }
+    if(y+key.height+2>bottom){pdf.addPage();page++;drawHead();}
+    pdf.addImage(key.data,'PNG',margin,bottom-key.height,182,key.height,undefined,'FAST');
+   }
+   // Release each student's decoded image references before processing the next.
    imageCache.clear();
- }
- const suffix=exportLabel?String(exportLabel).replace(/[^\w\u4e00-\u9fff-]/g,'_').slice(0,45)+'_':'';
- const file='MathAnalyze_個別卷合併_'+papers.length+'人_'+suffix+new Date().toISOString().slice(0,10)+'.pdf';
- setBusy(true,'PDF 已排版完成，正在準備下載……');
- pdf.save(file);
- toast('已產生合併PDF：'+papers.length+'位學生、'+total+'題；每份考卷尾端已附專屬答案頁。');
- } finally {imageCache.clear();}
+   if((k+1)%2===0||k+1===papers.length){
+    setBusy(true,'已排版 '+(k+1)+'／'+papers.length+' 位，'+total+' 題……');
+    await new Promise(r=>setTimeout(r,0));
+   }
+  }
+  const suffix=exportLabel?String(exportLabel).replace(/[^\\w\\u4e00-\\u9fff-]/g,'_').slice(0,45)+'_':'';
+  const file='MathAnalyze_個別卷合併_'+papers.length+'人_'+suffix+new Date().toISOString().slice(0,10)+'.pdf';
+  setBusy(true,'PDF 已排版完成，正在準備下載……');pdf.save(file);
+  toast('已產生合併PDF：'+papers.length+'位學生、'+total+'題。答案放在各卷末頁'+(overflow?'；'+overflow+'份題圖過長無法安全壓入兩頁，請檢查輸出頁數':'')+'。');
+ }finally{imageCache.clear();}
 }
 // 一鍵全班：以教師設定的固定座號名單為準；沒有固定名單才用全部已建學生。
 function classStudents(s){
