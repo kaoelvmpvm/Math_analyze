@@ -25,6 +25,7 @@ function renderStudents(){
  container.innerHTML=s.students.length?s.students.map(id=>'<label class="batch-student"><input type="checkbox" data-bulk-student="'+esc(id)+'" '+(selectedIds.has(id)?'checked':'')+'><span>'+esc(id)+'</span></label>').join(''):'<div class="notice warn">目前尚未建立學生代號。請先到「設定與備份」新增學生。</div>';
  $('bulkSelectedCount').textContent='已選 '+selectedIds.size+'／'+s.students.length+' 位';
  $('bulkDownload').disabled=generating||!selectedIds.size||!s.ready;
+ if($('bulkGenerateAll'))$('bulkGenerateAll').disabled=generating||!s.students.length||!s.ready;
  $('bulkMergeExisting').disabled=generating||!selectedIds.size||!s.ready||!s.papers.some(p=>p.mode==='individual'&&selectedIds.has(p.student));
 }
 function renderBatches(){
@@ -37,6 +38,7 @@ function renderBatches(){
 }
 function setBusy(on,message){
  generating=on;$('bulkDownload').disabled=on||!selectedIds.size||!snapshot().ready;
+ if($('bulkGenerateAll'))$('bulkGenerateAll').disabled=on||!snapshot().students.length||!snapshot().ready;
  $('bulkMergeExisting').disabled=on||!selectedIds.size||!snapshot().ready;
  if($('bulkProgress'))$('bulkProgress').textContent=message||'';
  document.querySelectorAll('[data-bulk-redownload]').forEach(btn=>btn.disabled=on);
@@ -126,7 +128,7 @@ async function getJpeg(id){
  const b=await API.imageBlob(id);if(!b)throw Error('題目 '+id+' 圖片不存在，請先重新匯入 v5 題圖包。');
  const result=await asJpeg(b);imageCache.set(id,result);return result;
 }
-async function combinedPdf(papers){
+async function combinedPdf(papers,exportLabel){
  if(!papers.length)throw Error('未選擇任何個別卷。');
  if(!snapshot().ready)throw Error('請先匯入 v5 題圖包，才能合併下載。');
  const JSPDF=window.jspdf?.jsPDF;if(!JSPDF)throw Error('PDF 組件未載入，請檢查網路連線並重新整理。');
@@ -156,30 +158,68 @@ async function combinedPdf(papers){
    }
    // Keep each student's answers immediately after their own questions, never mix keys.
    appendAnswerPage(pdf,p);
+   // Release decoded JPEG references between students to reduce browser memory use.
+   imageCache.clear();
  }
- const file='MathAnalyze_個別卷合併_'+papers.length+'人_'+new Date().toISOString().slice(0,10)+'.pdf';
+ const suffix=exportLabel?String(exportLabel).replace(/[^\w\u4e00-\u9fff-]/g,'_').slice(0,45)+'_':'';
+ const file='MathAnalyze_個別卷合併_'+papers.length+'人_'+suffix+new Date().toISOString().slice(0,10)+'.pdf';
  setBusy(true,'PDF 已排版完成，正在準備下載……');
  pdf.save(file);
  toast('已產生合併PDF：'+papers.length+'位學生、'+total+'題；每份考卷尾端已附專屬答案頁。');
  } finally {imageCache.clear();}
 }
-async function runBatch(){
+// 一鍵全班：以教師設定的固定座號名單為準；沒有固定名單才用全部已建學生。
+function classStudents(s){
+ const roster=s.roster||{},students=new Set(s.students);
+ if(roster.prefix&&Number.isInteger(roster.size)&&roster.size>0){
+  const ids=[];
+  for(let n=1;n<=roster.size;n++){
+   const id=roster.prefix+'-'+String(n).padStart(2,'0');
+   if(students.has(id))ids.push(id);
+  }
+  return ids;
+ }
+ return s.students.slice().sort((a,b)=>a.localeCompare(b,'zh-Hant',{numeric:true}));
+}
+async function generateIndividualPapers(ids,allClass){
  if(generating)return;
- const s=snapshot(),ids=s.students.filter(id=>selectedIds.has(id));
- if(!ids.length)return toast('請先選擇學生。',true);
+ const s=snapshot();
+ if(!ids.length)return toast('尚無已建立的學生，請先在「設定與備份」設定固定座號名單。',true);
  if(!s.ready)return toast('請先在設定與備份匯入 v5 題圖包。',true);
- const count=Number($('paperCount').value),minutes=Number($('paperMinutes').value),trainingDate=$('paperDate').value,topics=selectedTopics();
+ const count=Number($('paperCount').value),minutes=Number($('paperMinutes').value),
+       trainingDate=$('paperDate').value,topics=selectedTopics(),title=$('paperTitle').value;
+ if(!Number.isInteger(count)||count<4||count>45)return toast('請將出題數量設定為4～45題。',true);
+ if(!Number.isFinite(minutes)||minutes<=0)return toast('請確認測驗時間。',true);
  if(!topics.length)return toast('至少選擇一個考點。',true);
  if(!/^\d{4}-\d{2}-\d{2}$/.test(trainingDate))return toast('請選擇訓練日期。',true);
- if(ids.length*count>700&&!confirm('此次共 '+ids.length*count+' 題，合併 PDF 可能需要較長時間及記憶體。仍要繼續嗎？'))return;
- setBusy(true,'正在為 '+ids.length+' 位學生選題……');
+ // Respect the existing 40-student batch cap, and keep huge files manageable.
+ const size=allClass?Math.min(40,Math.max(1,Math.floor(900/count))):40;
+ if(!allClass&&ids.length>40)return toast('手動批次上限40位；若要產出整班，請使用「一鍵產生全班個別卷」。',true);
+ const groups=[];for(let i=0;i<ids.length;i+=size)groups.push(ids.slice(i,i+size));
+ if(allClass&&groups.length>1){
+   const questionCount=ids.length*count;
+   if(!confirm('全班共'+ids.length+'人，合計'+questionCount+'題。為避免單一PDF過大，將分成'+groups.length+'份下載（可能需要允許瀏覽器下載多個檔案）。繼續嗎？'))return;
+ }else if(ids.length*count>700&&!confirm('此次共 '+ids.length*count+' 題，PDF 可能需要較長時間及記憶體。仍要繼續嗎？'))return;
+ setBusy(true,'正在產生 '+ids.length+' 位學生的個別卷……');
+ let completed=0;
  try{
-  const papers=API.createBatch({students:ids,count,minutes,trainingDate,topics,title:$('paperTitle').value});
-  renderBatches();
-  await combinedPdf(papers);
- }catch(err){toast('批次處理未完成：'+err.message,true);setBusy(true,'操作遇到問題：'+err.message+'。如已產生試卷，可在下方「歷次批次」重新下載。');}
- finally{setBusy(false,$('bulkProgress').textContent);}
+  for(let i=0;i<groups.length;i++){
+   const group=groups[i];
+   setBusy(true,'正在處理第 '+(i+1)+'／'+groups.length+' 批，學生 '+(completed+1)+'～'+(completed+group.length)+'，合計 '+ids.length+' 人……');
+   const papers=API.createBatch({students:group,count,minutes,trainingDate,topics,title});
+   renderBatches();
+   completed+=papers.length;
+   const label=allClass?(groups.length>1?'全班_第'+(i+1)+'批':'全班'):'';
+   await combinedPdf(papers,label);
+  }
+  setBusy(true,'完成 '+completed+'／'+ids.length+' 份個別卷，已下載 '+groups.length+' 份PDF；每位學生附專屬答案頁。');
+ }catch(err){
+  toast('批次作業中止：'+err.message,true);
+  setBusy(true,'已建立 '+completed+'／'+ids.length+' 份試卷。若下載失敗，請從下方「歷次批次」重新下載。錯誤：'+err.message);
+ }finally{setBusy(false,$('bulkProgress').textContent);}
 }
+async function runBatch(){const s=snapshot();return generateIndividualPapers(s.students.filter(id=>selectedIds.has(id)),false);}
+async function generateAllClass(){return generateIndividualPapers(classStudents(snapshot()),true);}
 
 async function mergeExisting(){
  if(generating)return;
@@ -258,6 +298,7 @@ function init(){
  $('bulkSelectNone').onclick=()=>{selectedIds.clear();initialized=true;renderStudents();};
  $('bulkStudentList').addEventListener('change',e=>{const id=e.target.dataset.bulkStudent;if(!id)return;if(e.target.checked)selectedIds.add(id);else selectedIds.delete(id);initialized=true;renderStudents();});
  $('bulkDownload').onclick=runBatch;
+ $('bulkGenerateAll').onclick=generateAllClass;
  $('bulkMergeExisting').onclick=mergeExisting;
  $('bulkHistory').addEventListener('click',async e=>{
   const dl=e.target.closest('[data-bulk-redownload]'),ans=e.target.closest('[data-bulk-answers]');
