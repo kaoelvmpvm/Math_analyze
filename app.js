@@ -153,7 +153,10 @@ async function renderPreview(){
   var id=p.questionIds[i],q=byId[id],u=await cardUrl(id);
   texts.push('<article class="question-card"><div class="question-meta"><span>第 '+(i+1)+' 題 · '+safe(q?qname(q):'來源不存在')+'</span><span>'+safe(id)+'</span></div>'+(u?'<img alt="第'+(i+1)+'題" src="'+u+'">':'<div class="missing-asset">缺少題圖 '+safe(id)+'，不可直接列印</div>')+'</article>');
  }
- if(token===previewToken)$('paperPreview').innerHTML=texts.join('');
+ if(token===previewToken){
+  var key=p.questionIds.map(function(id,i){return '<span class="answer-cell"><b>第 '+(i+1)+' 題</b><strong>'+safe(byId[id]?.answer_as_provided||'待覆核')+'</strong></span>';}).join('');
+  $('paperPreview').innerHTML=texts.join('')+'<section class="answer-preview"><h3>本卷答案表（列印時置於最後一頁）</h3><p class="hint">依照本卷題目順序對應，答案來自原始題庫，正式使用前仍須教師覆核。</p><div class="preview-answer-grid">'+key+'</div></section>';
+ }
 }
 function csvDownload(name,rows){var csv='\ufeff'+rows.map(function(r){return r.map(function(cell){var s=String(cell==null?'':cell);if(/^[=+\-@\t\r]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';}).join(',');}).join('\r\n');download(name,'text/csv;charset=utf-8',csv);}
 function download(name,mime,content){var url=URL.createObjectURL(new Blob([content],{type:mime})),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},500);}
@@ -161,7 +164,7 @@ function answersCsv(){var p=paperOf(selectedPaperId);if(!p)return;csvDownload('�
 async function printCurrent(){
  var p=paperOf(selectedPaperId);if(!p)return;if(state.packVersion!==ASSET_VERSION){notify('舊圖包已停用；請先匯入v5題圖包。',true);return;}
  var cards=[];for(var i=0;i<p.questionIds.length;i++){var id=p.questionIds[i],u=await cardUrl(id);if(!u){notify('缺少原題圖：'+id+'，請重新匯入題包。',true);return;}cards.push('<div class="print-q"><div class="num">第 '+(i+1)+' 題</div><img src="'+u+'" alt="第'+(i+1)+'題"></div>');}
- $('print-root').innerHTML='<div class="print-hdr"><h2>'+safe(p.title)+'</h2><p>座號：＿＿＿＿　姓名：＿＿＿＿　　訓練日期：'+safe(p.trainingDate||String(p.date||'').slice(0,10))+'　　測驗時間：'+p.minutes+' 分鐘　　共 '+p.questionIds.length+' 題</p></div>'+cards.join('')+'<div class="answerpage"><h2>教師用答案卷（來源答案，請覆核）</h2><p>'+safe(p.title)+'</p><div class="answergrid">'+p.questionIds.map(function(id,i){return '<div>'+(i+1)+'. '+safe(byId[id].answer_as_provided)+'</div>';}).join('')+'</div></div>';
+ $('print-root').innerHTML='<div class="print-hdr"><h2>'+safe(p.title)+'</h2><p>座號：＿＿＿＿　姓名：＿＿＿＿　　訓練日期：'+safe(p.trainingDate||String(p.date||'').slice(0,10))+'　　測驗時間：'+p.minutes+' 分鐘　　共 '+p.questionIds.length+' 題</p></div>'+cards.join('')+'<div class="answerpage"><h2>本卷答案表（來源答案，請教師覆核）</h2><p>'+safe(p.title)+'｜'+safe(p.mode==='individual'?p.student:'全班')+'｜'+safe(p.trainingDate||String(p.date||'').slice(0,10))+'</p><p>依本卷第1題至第'+p.questionIds.length+'題順序排列</p><div class="answergrid">'+p.questionIds.map(function(id,i){return '<div>'+(i+1)+'. '+safe(byId[id]?.answer_as_provided||'待覆核')+'</div>';}).join('')+'</div></div>';
  var imgs=Array.from($('print-root').querySelectorAll('img'));
  await Promise.all(imgs.map(function(im){return im.complete?Promise.resolve():new Promise(function(ok){im.onload=im.onerror=ok;});}));
  window.print();
