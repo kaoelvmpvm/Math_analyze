@@ -66,7 +66,7 @@ function refresh(){
  lastStudent=selector.value;
  const topicsBox=$('practiceTopics');
  if(!topicsBox.dataset.initialized){
-  topicsBox.innerHTML=s.topics.map(t=>'<label><input type="checkbox" value="'+esc(t[0])+'" checked> '+esc(t[1])+'</label>').join('');
+  topicsBox.innerHTML=s.topics.map(t=>'<label class="topic-opt"><input type="checkbox" value="'+esc(t[0])+'" checked> '+esc(t[1])+'</label>').join('');
   topicsBox.dataset.initialized='true';
  }
  renderStatus();
