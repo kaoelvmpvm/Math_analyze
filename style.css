@@ -55,3 +55,12 @@
 #practiceTodayStatus .k{font-size:12px;color:var(--sub)}
 #practiceFeedback{margin-top:14px}
 @media(max-width:600px){.record-day>summary{padding:12px 9px}.seat-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.practice-options{grid-template-columns:repeat(2,minmax(0,1fr))}.record-day-progress{font-size:12px}}
+
+/* Answer key preview: single-paper last section; print answer page stays separate. */
+.answer-preview{margin:24px 0 0;padding:20px;border:1px solid var(--line);border-radius:12px;background:#f8fafc}
+.answer-preview h3{margin:0 0 8px;font-size:17px}
+.preview-answer-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.answer-cell{background:#fff;border:1px solid var(--line);border-radius:7px;padding:8px;display:flex;justify-content:space-between;gap:6px;align-items:center;font-size:12px}
+.answer-cell strong{font-size:15px;color:var(--ink)}
+@media(max-width:650px){.preview-answer-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media print{.answer-preview{display:none!important}.answerpage{break-before:page;page-break-before:always;break-inside:avoid}.answergrid>div{break-inside:avoid}}
