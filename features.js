@@ -74,6 +74,43 @@ function headerPng(p,continued){
  ctx.strokeStyle='#92a5b8';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(22,165);ctx.lineTo(1470,165);ctx.stroke();
  return c.toDataURL('image/png');
 }
+// 每張個別卷專屬的答案頁；中文排版轉成圖片，避免 jsPDF 預設字型缺字。
+// 只使用該卷 questionIds 的實際排序；不對來源答案進行擅自推論。
+function answerPagePng(p){
+ const c=document.createElement('canvas');
+ c.width=1540;c.height=2100;
+ const ctx=c.getContext('2d');
+ ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);
+ const font='"Microsoft JhengHei","Noto Sans TC",sans-serif';
+ ctx.fillStyle='#172c44';
+ ctx.font='bold 62px '+font;
+ ctx.fillText('本卷答案表',86,144);
+ ctx.font='34px '+font;
+ const exam=String(p.title||'數學個別卷');
+ ctx.fillText(exam.slice(0,36),86,224,1370);
+ ctx.font='28px '+font;ctx.fillStyle='#475569';
+ ctx.fillText('學生：'+String(p.student||'全班')+'　訓練日期：'+String(p.trainingDate||String(p.date||'').slice(0,10))+'　共 '+p.questionIds.length+' 題',86,295,1370);
+ ctx.strokeStyle='#cbd5e1';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(86,336);ctx.lineTo(1450,336);ctx.stroke();
+ ctx.font='25px '+font;ctx.fillText('依本卷題號排列；答案取自原始題庫，尚須教師覆核。',86,390,1370);
+ const columns=5,rows=Math.ceil(p.questionIds.length/columns),columnWidth=265,rowHeight=110;
+ const left=86,top=490;
+ for(let i=0;i<p.questionIds.length;i++){
+  const q=API.question(p.questionIds[i]);
+  const answer=q?.answer_as_provided==null?'待覆核':String(q.answer_as_provided).trim()||'待覆核';
+  const col=Math.floor(i/rows),row=i%rows;
+  const x=left+col*columnWidth,y=top+row*rowHeight;
+  ctx.fillStyle='#f5f8fc';ctx.fillRect(x,y-43,columnWidth-18,83);
+  ctx.font='28px '+font;ctx.fillStyle='#64748b';ctx.fillText(''+(i+1)+'.',x+13,y+11,64);
+  ctx.font='bold 38px '+font;ctx.fillStyle='#152d47';ctx.fillText(answer,x+75,y+13,columnWidth-102);
+ }
+ ctx.fillStyle='#64748b';ctx.font='24px '+font;
+ ctx.fillText('僅供核對：不同學生的試卷可能使用不同題目與順序。',86,1970,1350);
+ return c.toDataURL('image/png');
+}
+function appendAnswerPage(pdf,p){
+ pdf.addPage();
+ pdf.addImage(answerPagePng(p),'PNG',0,0,210,286,undefined,'FAST');
+}
 async function asJpeg(blob){
  const bitmap=await createImageBitmap(blob);
  const canvas=document.createElement('canvas');let width=bitmap.width;
@@ -117,11 +154,13 @@ async function combinedPdf(papers){
     y+=h+8;total++;
     if(total%7===0){setBusy(true,'正在合併 '+(k+1)+'／'+papers.length+' 位，已加入 '+total+' 題……');await new Promise(r=>setTimeout(r,0));}
    }
+   // Keep each student's answers immediately after their own questions, never mix keys.
+   appendAnswerPage(pdf,p);
  }
  const file='MathAnalyze_個別卷合併_'+papers.length+'人_'+new Date().toISOString().slice(0,10)+'.pdf';
  setBusy(true,'PDF 已排版完成，正在準備下載……');
  pdf.save(file);
- toast('已產生合併PDF：'+papers.length+'位學生、'+total+'題。');
+ toast('已產生合併PDF：'+papers.length+'位學生、'+total+'題；每份考卷尾端已附專屬答案頁。');
  } finally {imageCache.clear();}
 }
 async function runBatch(){
