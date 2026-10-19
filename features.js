@@ -2,6 +2,8 @@
 'use strict';
 const API=window.MathAnalyzeExtensionAPI;
 if(!API)return;
+const PDF_ENGINE_VERSION='v15-20261019-imagefix';
+window.MathAnalyzePdfEngineVersion=PDF_ENGINE_VERSION;
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pad=n=>String(n).padStart(2,'0');
@@ -314,6 +316,7 @@ async function openWrong(id){
 }
 function refresh(){renderStudents();renderBatches();individualReport();}
 function init(){
+ if($('bulkEngineStatus')){$('bulkEngineStatus').textContent='目前使用 PDF 引擎：'+PDF_ENGINE_VERSION+'（已修復誤判圖片尺寸）';$('bulkEngineStatus').dataset.loadedVersion=PDF_ENGINE_VERSION;}
  $('bulkSelectAll').onclick=()=>{selectedIds=new Set(snapshot().students);renderStudents();};
  $('bulkSelectNone').onclick=()=>{selectedIds.clear();initialized=true;renderStudents();};
  $('bulkStudentList').addEventListener('change',e=>{const id=e.target.dataset.bulkStudent;if(!id)return;if(e.target.checked)selectedIds.add(id);else selectedIds.delete(id);initialized=true;renderStudents();});
@@ -326,7 +329,7 @@ function init(){
   const papers=snapshot().papers.filter(p=>p.batchId===id).sort((a,b)=>a.student.localeCompare(b.student,'zh-Hant'));
   if(ans){batchAnswers(papers);return;}if(generating)return;
   setBusy(true,'正在合併既有批次 '+papers.length+' 份試卷……');
-  try{await combinedPdf(papers);}catch(err){toast('下載失敗：'+err.message,true);}finally{setBusy(false,'');}
+  try{await combinedPdf(papers);}catch(err){toast('下載失敗（PDF引擎 '+PDF_ENGINE_VERSION+'）：'+err.message,true);}finally{setBusy(false,'');}
  });
  $('studentWrongDetail').addEventListener('click',e=>{const btn=e.target.closest('[data-show-wrong]');if(btn)openWrong(btn.dataset.showWrong);});
  $('wrongDialogClose').onclick=()=>$('wrongDialog').close?.();
