@@ -261,7 +261,7 @@ function settings(){
  $('packStatus').className='notice '+(state.packVersion===ASSET_VERSION&&len?'success':'warn');
  $('packStatus').textContent=len&&state.packVersion===ASSET_VERSION?'已載入新版 v5 共 '+len+' 題（保留PDF原圖；按教師九類分類）。題圖與紀錄均在此瀏覽器。':'尚未匯入新版 v5 題圖包，舊版題圖已停用。請下載 v5 ZIP 並重新匯入，原有測驗和學生紀錄會保留。';
 }
-function refreshAll(){refreshStudents();refreshTopics();refreshDashboard();refreshBank();paperList();refreshRecordHistory();report();settings();renderPreview();loadExistingRecord();if(window.MathAnalyzeExtensions?.refresh)window.MathAnalyzeExtensions.refresh();}
+function refreshAll(){refreshStudents();refreshTopics();refreshDashboard();refreshBank();paperList();refreshRecordHistory();report();settings();renderPreview();loadExistingRecord();if(window.MathAnalyzeExtensions?.refresh)window.MathAnalyzeExtensions.refresh();if(window.MathAnalyzePractice?.refresh)window.MathAnalyzePractice.refresh();}
 function switchTab(name){
  document.querySelectorAll('.tab').forEach(function(x){x.classList.toggle('active',x.id===name);});
  document.querySelectorAll('.nav-btn').forEach(function(x){x.classList.toggle('active',x.dataset.target===name);});
@@ -323,8 +323,59 @@ function createStudentBatch(request){
  save();refreshAll();
  return batch;
 }
+
+function practiceUsed(student,day){
+ return state.results.reduce(function(sum,r){var p=paperOf(r.paperId);return sum+(r.student===student&&p?.isSelfPractice&&p.trainingDate===day?(p.questionIds||[]).length:0);},0);
+}
+function getPracticeDraft(student,day){
+ return state.papers.find(function(p){return p.isSelfPractice&&p.student===student&&p.trainingDate===day&&!state.results.some(function(r){return r.paperId===p.id&&r.student===student;});})||null;
+}
+function makeSelfPractice(req){
+ if(!catalog||state.packVersion!==ASSET_VERSION)throw Error('請先在這個瀏覽器匯入 v5 題圖包。');
+ var student=String(req.student||''),day=localISODate(),count=Number(req.count),topics=Array.from(new Set(req.topics||[])).filter(function(x){return TOPICS.some(function(t){return t[0]===x;});});
+ if(!state.students.includes(student))throw Error('請先選擇已建立的學生座號。');
+ if(!topics.length)throw Error('請至少選擇一項考點。');
+ if(!Number.isInteger(count)||count<1||count>15)throw Error('每日單回練習為1～15題。');
+ var previous=getPracticeDraft(student,day);if(previous)return previous;
+ var remaining=15-practiceUsed(student,day);if(count>remaining)throw Error('今日剩餘額度 '+remaining+' 題，不能超過每日15題。');
+ var available=catalog.questions.filter(function(q){return active(q)&&/^[ABCD]$/.test(String(q.answer_as_provided||'').trim().toUpperCase());});
+ var plan=window.MathAnalyzeAdaptive.generate({questions:available,isUsable:active,papers:state.papers,results:state.results,count:count,topics:topics,scope:student,trainingDate:day});
+ var p={id:uid(),title:day+' '+student+' 自主練習',student:student,mode:'individual',isSelfPractice:true,
+  trainingDate:day,date:new Date().toISOString(),minutes:15,questionIds:plan.ids,selectionReport:plan.report};
+ state.papers.push(p);state.practiceDrafts[p.id]={answers:{},startedAt:Date.now()};
+ save();refreshAll();return p;
+}
+function practiceChoose(paperId,questionId,choice){
+ var p=paperOf(paperId),d=state.practiceDrafts[paperId];
+ if(!p?.isSelfPractice||!d||!p.questionIds.includes(questionId)||!['A','B','C','D',''].includes(choice))throw Error('無法更新目前的作答草稿。');
+ d.answers[questionId]=choice;save();
+}
+function submitSelfPractice(paperId){
+ var p=paperOf(paperId),d=state.practiceDrafts[paperId];if(!p?.isSelfPractice||!d)throw Error('找不到未完成的自主練習。');
+ if(p.trainingDate!==localISODate())throw Error('已跨日，請重新開始今天的練習；舊草稿不計入作答。');
+ if(state.results.some(function(r){return r.paperId===p.id&&r.student===p.student;}))throw Error('此份練習已經登記，不能重複提交。');
+ var remaining=15-practiceUsed(p.student,p.trainingDate);
+ if((p.questionIds||[]).length>remaining)throw Error('提交會超過本日15題上限，請確認紀錄。');
+ var wrong=[],blank=[],reasons={},answers={};
+ p.questionIds.forEach(function(id){
+   var answer=String(d.answers[id]||'').trim().toUpperCase(),correct=String(byId[id]?.answer_as_provided||'').trim().toUpperCase();
+   answers[id]=answer;
+   if(!answer)blank.push(id);
+   else if(answer!==correct){wrong.push(id);reasons[id]='U';}
+ });
+ var elapsed=Math.max(0.5,Math.round((Date.now()-Number(d.startedAt||Date.now()))/30000)/2);
+ var record={paperId:p.id,student:p.student,minutes:elapsed,wrong:wrong,blank:blank,reasons:reasons,choices:answers,source:'self-practice',date:new Date().toISOString()};
+ state.results.push(record);delete state.practiceDrafts[paperId];save();refreshAll();
+ return {paperId:p.id,student:p.student,total:p.questionIds.length,correct:p.questionIds.length-wrong.length-blank.length,wrong:wrong.length,blank:blank.length};
+}
 window.MathAnalyzeExtensionAPI={
- snapshot:function(){return {students:state.students.slice(),papers:state.papers.slice(),results:state.results.slice(),topics:TOPICS.map(function(x){return x.slice();}),ready:!!catalog&&state.packVersion===ASSET_VERSION};},
+ snapshot:function(){return {students:rosterStudents(),papers:state.papers.slice(),results:state.results.slice(),topics:TOPICS.map(function(x){return x.slice();}),ready:!!catalog&&state.packVersion===ASSET_VERSION,roster:state.roster,practiceDrafts:state.practiceDrafts};},
+ today:localISODate,
+ practiceUsed:practiceUsed,
+ getPracticeDraft:getPracticeDraft,
+ createSelfPractice:makeSelfPractice,
+ choosePractice:practiceChoose,
+ submitSelfPractice:submitSelfPractice,
  question:function(id){return byId[id]||null;},
  imageBlob:blobFor,
  createBatch:createStudentBatch,
