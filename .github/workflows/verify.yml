@@ -1,0 +1,26 @@
+name: Verify Math Analyze
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check scripts
+        run: |
+          node --check app.js
+          node --check adaptive.js
+          node --check features.js
+          node --check practice.js
+          node --check fixed-pages-core.js
+          node --check fixed-pages.js
+      - name: Verify bounded A4 and answer placement
+        run: node tests/fixed-pages.test.cjs
